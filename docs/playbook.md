@@ -156,9 +156,19 @@ The blogs already on page 1 did your homework for you. Extract it:
 
 ## 6. Free backlinks that actually work
 
-*(filled from dedicated research — see docs/research/05-earnings-and-backlinks.md)*
+Full detail in [docs/research/05-earnings-and-backlinks.md](research/05-earnings-and-backlinks.md). Ranked by value-per-hour for a solo blogger:
 
-See section 6 of the research doc for the ranked list, what to avoid, and realistic monthly numbers.
+1. **Journalist requests** — HARO is back and FREE (relaunched by Featured.com, April 2025). Also free: Qwoted, Source of Sources, MentionMatch (ex-Help a B2B Writer), SourceBottle. Answer 10–20 relevant requests/month with genuine expertise → 1–3 high-authority dofollow links. Best free link source that exists.
+2. **Statistics/data posts** — write one "X statistics 2026" page in your niche with collected numbers. Writers cite stats pages for years. Passive link magnet.
+3. **Selective guest posting** — 1–2/month on real, relevant blogs (see §11). Still the #1 deliberate tactic; mass AI guest-posting was specifically targeted by Google's Oct 2025 spam update.
+4. **Broken link building & resource pages** — find dead links on resource pages in your niche, offer your post as the replacement. 8–12% reply rates with personalized emails.
+5. **Testimonials & podcast guesting** — write testimonials for tools you actually use (easy dofollow); appear on small niche podcasts (link in show notes + audience).
+6. **One-time setup**: create the ~10 major social profiles with consistent name/bio/URL (entity signals, branded SERP, indexing speed — mostly nofollow but still valuable), plus quality directories only (Google Business Profile / Bing Places if local, real industry directories).
+7. **Reddit/Quora participation** — nofollow, but real traffic + heavy weight in AI search answers in 2026. Participate genuinely; never link-drop.
+
+**Realistic target: 3–8 quality links/month.** 5 real links beat 500 spam links.
+
+**NEVER:** Fiverr link packages, PBNs, mass directories, comment spam, link exchanges, paid links without `rel=sponsored`. Google's Aug/Oct 2025 spam updates detect these network patterns — penalties cut traffic 50–90% and also kill AdSense prospects.
 
 ---
 
@@ -193,9 +203,34 @@ Google finds URLs via your **sitemap** (`yourblog.com/sitemap.xml` — Blogger a
 
 ## 8. Getting more earnings
 
-*(filled from dedicated research — see docs/research/05-earnings-and-backlinks.md)*
+Full detail in [docs/research/05-earnings-and-backlinks.md](research/05-earnings-and-backlinks.md). The formula:
 
-See section 8 summary there: AdSense eligibility & realistic RPM math, what raises RPM (niche, geography, placement), and what's realistic beyond AdSense (affiliate, sponsored posts, digital products).
+```
+monthly income = (pageviews ÷ 1,000) × page RPM
+```
+
+You control both factors:
+
+### Raise pageviews → everything in this playbook (§1–§10)
+
+### Raise RPM — the three levers
+1. **Traffic geography (the biggest lever).** US/UK/CA/AU traffic pays $15–60 per 1,000 views; Pakistan/South Asia traffic often pays under $1–3. The same article written for and ranked in Tier-1 English searches earns 10–50x more. Target Tier-1 keywords in English wherever possible.
+2. **Niche.** Finance/insurance/legal ($25–60 RPM) > SaaS/hosting ($20–40) > tech ($10–25) > recipes ($5–15) > entertainment/celebrity ($2–6).
+3. **Placement.** Manual ad units after paragraph 1–2, mid-article, and end-of-article + Auto ads as top-up beat Auto-only (~22% in tests). Don't stack ads above the fold.
+
+### AdSense on Blogger — the path
+- Blogspot blogs CAN get AdSense (Blogger is a host partner; apply via the Earnings tab), but a custom domain improves approval odds and portability.
+- **In Pakistan/India: the blog must be ~6 months old** before applying. Practical bar: 15–20+ original posts of 800+ words, About/Contact/Privacy Policy pages, clean template, some organic traffic.
+- Payment: $100 threshold, monthly, bank transfer works in Pakistan.
+- **What gets blogs banned** (50,000+ accounts banned Q1 2026): unedited AI content at scale, thin/copied posts, bought/exchanged traffic, self-clicks, movie/APK/download niches, missing privacy pages, many near-identical blogs under one identity.
+
+### Beyond AdSense (stack these)
+- **Affiliate from day 1**: Amazon Associates (free; need 3 sales in 180 days to stay in) and hosting/SaaS/VPN programs ($50–200/sale — often better than AdSense for small traffic).
+- **At ~10k sessions/month**: apply to Journey by Mediavine or Monumetric (better RPMs than AdSense). Ezoic is no longer an option for small sites (250k minimum since Feb 2026).
+- **Later**: sponsored posts ($30–150 for a small blog — always `rel=sponsored`), digital products (100% margin once you have an audience).
+
+### Realistic timeline for a new blog
+Months 0–4: write 20–40 posts, little traffic (normal). Months 4–6: apply AdSense. Months 6–12: first $100 payout typically lands here. Months 12–24: $100–500/month achievable in a good niche with consistency. Most blogs fail by quitting before month 12.
 
 ---
 

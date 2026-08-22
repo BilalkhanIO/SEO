@@ -1,0 +1,29 @@
+{
+  "name": "blogger-seo-command-center",
+  "version": "0.1.0",
+  "description": "Multi-blog SEO automation for Google Blogger: keyword research, SERP analysis, content pipeline, tracking, site health, and outreach. Terminal-first (Claude Code), with a web dashboard.",
+  "type": "module",
+  "bin": {
+    "seo": "./bin/seo.js"
+  },
+  "scripts": {
+    "seo": "tsx src/cli.ts",
+    "build": "tsc",
+    "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "cheerio": "^1.0.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

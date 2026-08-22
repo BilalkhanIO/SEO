@@ -2,7 +2,40 @@
 
 An automation tool for Google Blogger blogs that connects the free Google SEO tools (Search Console, Analytics, Blogger API, PageSpeed) and other free SEO tools into one dashboard — covering the full loop: **research → write → optimize → publish → track → refresh**, plus an outreach tracker for contacting other blogs.
 
-> **Status:** Research phase complete (August 2026). See [`docs/research/`](docs/research/) for the full findings. Build phase pending decisions in [Open Questions](#open-questions).
+> **Status:** Core CLI built (M1–M7 first pass) — keyword research, SERP briefs, pre-publish gate, Blogger publishing, GSC tracking recipes, health checks, and outreach CRM all work from the terminal and from Claude Code. Web dashboard (Vercel + Gemini) is next. Research: [`docs/research/`](docs/research/) · How-to: [`docs/playbook.md`](docs/playbook.md).
+
+## Getting started
+
+```bash
+npm install
+cp .env.example .env      # fill GOOGLE_CLIENT_ID/SECRET (+ optional SERPER_API_KEY etc.)
+npm run seo -- init       # create the local database
+npm run seo -- auth login # one-time Google OAuth (Blogger + Search Console + GA4 + AdSense)
+npm run seo -- blogs sync # imports ALL your Blogger blogs + links their GSC properties
+```
+
+Multi-blog: every command takes `--blog <id|url>`. Local DB is a SQLite file (`data/seo.db`); point `DATABASE_URL` at a Turso/libSQL URL for the Vercel deployment.
+
+## Daily use (CLI or via Claude Code skills)
+
+| Task | Command |
+|---|---|
+| Find keywords from a seed | `npm run seo -- kw harvest "blogger seo" --blog 1 --gl us` |
+| Mine your GSC for validated ideas | `npm run seo -- kw mine --blog 1` |
+| Analyze the SERP + competitors for a keyword | `npm run seo -- kw serp <keywordId>` |
+| Score through the 5-gate funnel | `npm run seo -- kw score <id> --relevance 2 --intent-fit 2 --winnable 1 --traffic 2 --value 2` |
+| Create the content brief | `npm run seo -- post brief <keywordId>` |
+| Pre-publish gate | `npm run seo -- post validate draft.html --title "..." --keyword "..."` |
+| Push draft to Blogger | `npm run seo -- post publish draft.html --title "..." --blog 1` |
+| Generate JSON-LD schema | `npm run seo -- post schema --title ... --url ... --author ...` |
+| Sync Search Console data | `npm run seo -- track sync --blog 1` |
+| Get the action list (striking distance, CTR fixes, decay) | `npm run seo -- track recipes --blog 1` |
+| Core Web Vitals | `npm run seo -- health speed <url>` |
+| Index status + fix advice | `npm run seo -- health index <url> --blog 1` |
+| Add outreach prospect | `npm run seo -- outreach add <url> --blog 1 --email ...` |
+| What follow-ups are due | `npm run seo -- outreach next --blog 1` |
+
+**In Claude Code**, four skills wrap these into guided workflows: `seo-keyword-research`, `seo-write-post`, `seo-weekly-review`, `seo-outreach` (in `.claude/skills/`). Claude does the judgment (intent, difficulty, drafting); the CLI does the data. In the web app the same AI steps will use Gemini.
 
 ---
 
