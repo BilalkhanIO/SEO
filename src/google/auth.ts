@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import { google } from "googleapis";
-import type { OAuth2Client, Credentials } from "google-auth-library";
+import type { Credentials } from "google-auth-library";
 import { loadConfig, TOKENS_PATH } from "../config.js";
 
 export const SCOPES = [
@@ -27,7 +27,7 @@ export function storeTokens(tokens: Credentials): void {
   fs.writeFileSync(TOKENS_PATH(), JSON.stringify({ ...existing, ...tokens }, null, 2));
 }
 
-export function getOAuthClient(): OAuth2Client {
+export function getOAuthClient(): InstanceType<typeof google.auth.OAuth2> {
   const cfg = loadConfig();
   if (!cfg.google.clientId || !cfg.google.clientSecret) {
     throw new Error(

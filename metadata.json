@@ -1,0 +1,8 @@
+{
+  "name": "Blogger SEO Command Center",
+  "description": "Multi-blog SEO automation, keyword research, SERP analysis, content pipeline, performance tracking, site health, and outreach CRM.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

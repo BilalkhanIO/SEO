@@ -65,7 +65,8 @@ export async function extractPage(url: string): Promise<{ headings: string[]; wo
 
   const headings: string[] = [];
   $("h1, h2, h3").each((_, el) => {
-    const tag = el.tagName.toUpperCase();
+    const tag = (el as any).tagName?.toUpperCase() || (el as any).name?.toUpperCase();
+    if (!tag) return;
     const text = $(el).text().trim().replace(/\s+/g, " ");
     if (text && text.length < 200) headings.push(`${tag}: ${text}`);
   });

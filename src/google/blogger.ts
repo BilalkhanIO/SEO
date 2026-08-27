@@ -2,7 +2,7 @@ import { google, blogger_v3 } from "googleapis";
 import { getOAuthClient } from "./auth.js";
 
 function api(): blogger_v3.Blogger {
-  return google.blogger({ version: "v3", auth: getOAuthClient() });
+  return google.blogger({ version: "v3", auth: getOAuthClient() as any });
 }
 
 export async function listBlogs() {

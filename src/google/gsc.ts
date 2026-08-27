@@ -10,7 +10,7 @@ export interface GscRow {
 }
 
 function sc() {
-  return google.searchconsole({ version: "v1", auth: getOAuthClient() });
+  return google.searchconsole({ version: "v1", auth: getOAuthClient() as any });
 }
 
 export async function listSites(): Promise<string[]> {
