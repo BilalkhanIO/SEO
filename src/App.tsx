@@ -11,6 +11,7 @@ import { SiteHealth } from "./components/SiteHealth.js";
 import { OutreachCrm } from "./components/OutreachCrm.js";
 import { BlogManager } from "./components/BlogManager.js";
 import { TechnicalTools } from "./components/TechnicalTools.js";
+import { AutoPilot } from "./components/AutoPilot.js";
 import {
   Sparkles,
   LayoutDashboard,
@@ -27,6 +28,7 @@ import {
   ShieldCheck,
   AlertCircle,
   Wrench,
+  Rocket,
 } from "lucide-react";
 
 export const App: React.FC = () => {
@@ -63,9 +65,34 @@ export const App: React.FC = () => {
     fetchBlogs();
   }, []);
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const origin = event.origin;
+      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) return;
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        fetchSystemStatus();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  const handleConnectGoogle = async () => {
+    try {
+      const response = await fetch('/api/auth/url');
+      if (!response.ok) throw new Error('Failed to get auth URL');
+      const { url } = await response.json();
+      
+      const authWindow = window.open(url, 'oauth_popup', 'width=600,height=700');
+      if (!authWindow) alert('Please allow popups for this site to connect your Google account.');
+    } catch (err: any) {
+      alert("Error initiating OAuth: " + err.message);
+    }
+  };
+
   const fetchSystemStatus = async () => {
     try {
-      const res = await fetch("/api/system/status");
+      const res = await fetch("/api/status");
       if (res.ok) {
         setSystemStatus(await res.json());
       }
@@ -117,6 +144,7 @@ export const App: React.FC = () => {
     { id: "health", label: "Site Health", icon: Activity },
     { id: "outreach", label: "Outreach CRM", icon: Send },
     { id: "tools", label: "Tech SEO Tools", icon: Wrench },
+    { id: "autoblog", label: "Auto-Pilot", icon: Rocket },
     { id: "blogs", label: "Blogs", icon: Globe },
   ];
 
@@ -231,6 +259,26 @@ export const App: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        {!systemStatus.authReady && (
+          <div className="mb-6 bg-stone-900 border border-stone-700/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                <ShieldCheck className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-stone-200">Connect Your Google Account</h3>
+                <p className="text-xs text-stone-400 mt-0.5">Required for Blogger and Google Search Console integration.</p>
+              </div>
+            </div>
+            <button 
+              onClick={handleConnectGoogle}
+              className="whitespace-nowrap px-5 py-2 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold shadow-md transition-colors"
+            >
+              Authenticate with Google
+            </button>
+          </div>
+        )}
+
         {activeTab === "overview" && (
           <Overview
             currentBlog={currentBlog}
@@ -284,6 +332,7 @@ export const App: React.FC = () => {
         {activeTab === "outreach" && <OutreachCrm currentBlog={currentBlog} />}
 
         {activeTab === "tools" && <TechnicalTools />}
+        {activeTab === "autoblog" && <AutoPilot currentBlog={currentBlog} />}
 
         {activeTab === "blogs" && (
           <BlogManager

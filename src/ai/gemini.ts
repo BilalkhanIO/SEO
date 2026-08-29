@@ -53,7 +53,7 @@ Generate a clear, highly actionable Markdown brief containing:
 Format purely in clean, readable Markdown.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.7-flash",
+    model: "gemini-3.6-flash",
     contents: prompt,
   });
 
@@ -89,7 +89,7 @@ Respond ONLY in valid JSON with this exact structure:
 }`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.7-flash",
+    model: "gemini-3.6-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -113,8 +113,46 @@ Respond ONLY in valid JSON with this exact structure:
 }
 
 /**
- * Expand Keyword clusters and analyze intent using Gemini
+ * Auto-generate a full SEO blog post in HTML format for Blogger
  */
+export async function generateAutoBlogPost(
+  keyword: string,
+  niche?: string
+): Promise<{ title: string; htmlContent: string; tags: string[] }> {
+  const ai = getAiClient();
+  const prompt = `You are a world-class AI Content Writer and SEO expert specializing in Google Blogger.
+Write a comprehensive, engaging, and fully optimized blog post targeting the keyword: "${keyword}".
+${niche ? `Niche: ${niche}` : ""}
+
+Requirements:
+1. Provide an SEO-optimized H1 title (under 60 characters).
+2. Write the full body content using semantic HTML5 tags (<h2>, <h3>, <p>, <ul>, <li>, <strong>, <em>, <blockquote>).
+3. The content must be highly readable, authoritative, and structurally sound (intro, body sections, FAQ, conclusion).
+4. Do NOT output Markdown. ONLY output clean HTML for the body. Do not include <html>, <head>, or <body> wrappers.
+5. Provide 3-5 relevant category tags/labels for the Blogger post.
+
+Respond ONLY in valid JSON format with this exact structure:
+{
+  "title": "Your SEO H1 Title Here",
+  "htmlContent": "<h2>Introduction</h2><p>...</p>",
+  "tags": ["tag1", "tag2", "tag3"]
+}`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3.6-flash",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+    },
+  });
+
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (err) {
+    throw new Error("Failed to generate blog post content.");
+  }
+}
+
 export async function expandKeywordsWithGemini(
   seed: string,
   niche?: string
@@ -149,7 +187,7 @@ Respond ONLY in valid JSON format:
 ]`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.7-flash",
+    model: "gemini-3.6-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",

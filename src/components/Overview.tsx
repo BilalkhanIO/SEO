@@ -40,13 +40,14 @@ export const Overview: React.FC<OverviewProps> = ({ currentBlog, onNavigate, sys
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const blogQuery = currentBlog ? `?blogId=${currentBlog.id}` : "";
+      const blogQuery = currentBlog ? `blogId=${currentBlog.id}` : "";
+      const queryPrefix = blogQuery ? `?${blogQuery}&` : "?";
       
       const [alertsRes, dueRes, postsRes, kwRes] = await Promise.all([
-        fetch(`/api/alerts${blogQuery}&status=open`),
-        fetch(`/api/outreach/due${blogQuery}`),
-        fetch(`/api/posts${blogQuery}`),
-        fetch(`/api/keywords${blogQuery}&status=scored`),
+        fetch(`/api/alerts${queryPrefix}status=open`),
+        fetch(`/api/outreach/due${currentBlog ? `?${blogQuery}` : ""}`),
+        fetch(`/api/posts${currentBlog ? `?${blogQuery}` : ""}`),
+        fetch(`/api/keywords${queryPrefix}status=scored`),
       ]);
 
       if (alertsRes.ok) setAlerts(await alertsRes.json());

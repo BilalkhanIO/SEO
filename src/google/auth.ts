@@ -9,6 +9,7 @@ export const SCOPES = [
   "https://www.googleapis.com/auth/webmasters",
   "https://www.googleapis.com/auth/analytics.readonly",
   "https://www.googleapis.com/auth/adsense.readonly",
+  "https://www.googleapis.com/auth/indexing",
 ];
 
 const REDIRECT_PORT = 8123;
@@ -27,14 +28,18 @@ export function storeTokens(tokens: Credentials): void {
   fs.writeFileSync(TOKENS_PATH(), JSON.stringify({ ...existing, ...tokens }, null, 2));
 }
 
-export function getOAuthClient(): InstanceType<typeof google.auth.OAuth2> {
+export function getOAuthClient(redirectUri?: string): InstanceType<typeof google.auth.OAuth2> {
   const cfg = loadConfig();
   if (!cfg.google.clientId || !cfg.google.clientSecret) {
     throw new Error(
-      "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing. Copy .env.example to .env and fill them (Google Cloud Console → Credentials → OAuth client, redirect URI http://localhost:8123/callback)."
+      "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing. Copy .env.example to .env and fill them."
     );
   }
-  const client = new google.auth.OAuth2(cfg.google.clientId, cfg.google.clientSecret, REDIRECT_URI);
+  const client = new google.auth.OAuth2(
+    cfg.google.clientId,
+    cfg.google.clientSecret,
+    redirectUri || REDIRECT_URI
+  );
 
   const stored = readStoredTokens();
   if (stored) client.setCredentials(stored);

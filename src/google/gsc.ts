@@ -76,3 +76,28 @@ export async function listSitemaps(siteUrl: string) {
     isPending: s.isPending,
   }));
 }
+
+export async function requestGoogleIndexing(url: string, type: "URL_UPDATED" | "URL_DELETED" = "URL_UPDATED"): Promise<any> {
+  const auth = getOAuthClient() as any;
+  const token = await auth.getAccessToken();
+  
+  const res = await fetch("https://indexing.googleapis.com/v3/urlNotifications:publish", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token.token}`
+    },
+    body: JSON.stringify({
+      url,
+      type
+    })
+  });
+  
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Indexing API Error: ${res.status} ${errText}`);
+  }
+  
+  return await res.json();
+}
+

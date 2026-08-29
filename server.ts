@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { migrate, all, run } from "./src/store.js";
-import { hasCredentials } from "./src/google/auth.js";
+import { hasCredentials, getOAuthClient, storeTokens, SCOPES } from "./src/google/auth.js";
 import * as gsc from "./src/google/gsc.js";
 import * as blogger from "./src/google/blogger.js";
 import { runPageSpeed } from "./src/google/pagespeed.js";
@@ -13,10 +13,12 @@ import { articleSchema, faqSchema, howToSchema } from "./src/content/schema.js";
 import { runRecipes, saveAlerts } from "./src/tracking/recipes.js";
 import * as outreach from "./src/outreach/outreach.js";
 import { loadConfig } from "./src/config.js";
+import { runAutomationCycle } from "./src/automation/routine.js";
 import {
   generateSeoBriefWithGemini,
   generateSeoMetadataWithGemini,
   expandKeywordsWithGemini,
+  generateAutoBlogPost,
 } from "./src/ai/gemini.js";
 
 async function startServer() {
@@ -34,6 +36,66 @@ async function startServer() {
   }
 
   /* ------------------- API ROUTES ------------------- */
+
+  app.post("/api/automation/run", async (req, res) => {
+    try {
+      const { blogId, niche } = req.body;
+      if (!blogId || !niche) return res.status(400).json({ error: "blogId and niche required" });
+      const result = await runAutomationCycle(blogId, niche);
+      res.json(result);
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: err.message, log: ["Fatal error occurred", err.message] });
+    }
+  });
+
+  
+  // Auth Flows
+  app.get("/api/auth/url", (req, res) => {
+    try {
+      const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+      const client = getOAuthClient(redirectUri);
+      const url = client.generateAuthUrl({
+        access_type: "offline",
+        scope: SCOPES,
+        prompt: "consent",
+      });
+      res.json({ url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get(["/api/auth/google/callback", "/api/auth/google/callback/"], async (req, res) => {
+    try {
+      const code = req.query.code as string;
+      if (!code) {
+        return res.status(400).send("No code provided.");
+      }
+      const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+      const client = getOAuthClient(redirectUri);
+      const { tokens } = await client.getToken(code);
+      storeTokens(tokens);
+
+      res.send(`
+        <html>
+          <body>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+                window.close();
+              } else {
+                window.location.href = '/';
+              }
+            </script>
+            <p>Authentication successful. You can close this window.</p>
+          </body>
+        </html>
+      `);
+    } catch (err: any) {
+      res.status(500).send("Authentication error: " + err.message);
+    }
+  });
 
   // System & Auth Status
   app.get("/api/status", async (req, res) => {
@@ -672,7 +734,47 @@ async function startServer() {
     }
   });
 
+  app.post("/api/ai/autoblog", async (req, res) => {
+    try {
+      const { keyword, niche, blogId, isDraft } = req.body;
+      if (!keyword || !blogId) return res.status(400).json({ error: "Keyword and blogId are required" });
+      
+      const blog = db.prepare("SELECT * FROM blogs WHERE id = ?").get(blogId) as any;
+      if (!blog || !blog.blogger_blog_id) return res.status(400).json({ error: "Blog not found or lacks a linked Blogger ID" });
+
+      const content = await generateAutoBlogPost(keyword, niche);
+      const post = await blogger.insertPost({
+        blogId: blog.blogger_blog_id,
+        title: content.title,
+        contentHtml: content.htmlContent,
+        labels: content.tags,
+        isDraft: isDraft !== false,
+      });
+
+      res.json({
+        success: true,
+        postUrl: post.url,
+        postId: post.id,
+        isDraft: post.title ? true : false // just an indicator
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to generate auto blog" });
+    }
+  });
+
   /* ------------------- TECH SEO TOOLS ------------------- */
+
+  app.post("/api/tools/index-url", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url) return res.status(400).json({ error: "URL is required" });
+      
+      const response = await gsc.requestGoogleIndexing(url, "URL_UPDATED");
+      res.json({ success: true, response });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to index URL" });
+    }
+  });
 
   app.post("/api/tools/scrape-url", async (req, res) => {
     try {

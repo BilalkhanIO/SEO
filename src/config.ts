@@ -1,6 +1,18 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import fs from "node:fs";
 import path from "node:path";
+
+dotenv.config({ override: true });
+
+function cleanEnv(val?: string): string | undefined {
+  if (!val) return undefined;
+  let cleaned = val.trim();
+  if (cleaned.includes("#")) {
+    cleaned = cleaned.split("#")[0].trim();
+  }
+  cleaned = cleaned.replace(/^["']+|["']+$/g, "").trim();
+  return cleaned || undefined;
+}
 
 export interface AppConfig {
   databaseUrl: string;
@@ -25,17 +37,17 @@ export function loadConfig(): AppConfig {
   const defaultClientId = "986619466549-o6hntm2g2r40cum796eem9vqjjvehfbd.apps.googleusercontent.com";
 
   return {
-    databaseUrl: process.env.DATABASE_URL || "file:./data/seo.db",
-    databaseAuthToken: process.env.DATABASE_AUTH_TOKEN || undefined,
+    databaseUrl: cleanEnv(process.env.DATABASE_URL) || "file:./data/seo.db",
+    databaseAuthToken: cleanEnv(process.env.DATABASE_AUTH_TOKEN),
     google: {
-      clientId: process.env.GOOGLE_CLIENT_ID || defaultClientId,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
+      clientId: cleanEnv(process.env.GOOGLE_CLIENT_ID) || defaultClientId,
+      clientSecret: cleanEnv(process.env.GOOGLE_CLIENT_SECRET),
+      refreshToken: cleanEnv(process.env.GOOGLE_REFRESH_TOKEN),
     },
-    geminiApiKey: process.env.GEMINI_API_KEY || defaultApiKey,
-    serperApiKey: process.env.SERPER_API_KEY,
-    pagespeedApiKey: process.env.PAGESPEED_API_KEY || defaultApiKey,
-    bingApiKey: process.env.BING_WEBMASTER_API_KEY,
+    geminiApiKey: cleanEnv(process.env.GEMINI_API_KEY) || defaultApiKey,
+    serperApiKey: cleanEnv(process.env.SERPER_API_KEY),
+    pagespeedApiKey: cleanEnv(process.env.PAGESPEED_API_KEY) || defaultApiKey,
+    bingApiKey: cleanEnv(process.env.BING_WEBMASTER_API_KEY),
     dataDir,
   };
 }
