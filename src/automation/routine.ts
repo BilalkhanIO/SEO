@@ -20,7 +20,7 @@ export async function runAutomationCycle(blogId: number, niche: string) {
 
   pushLog(`Starting automation cycle for blog ID ${blogId}, niche: ${niche}`);
 
-  const blog = db().prepare("SELECT * FROM blogs WHERE id = ?").get(blogId) as any;
+  const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
   if (!blog || !blog.blogger_blog_id) {
     pushLog("Error: Blog not found or lacks a linked Blogger ID");
     return { success: false, log };
@@ -44,7 +44,7 @@ Return ONLY the raw keyword phrase, no formatting, no quotes.`;
   // Try to grab SERP data for it
   try {
      const serp = await fetchSerp(keyword);
-     pushLog(`Pulled SERP data for keyword. Found ${serp.organic.length} top ranking competitors.`);
+     pushLog(`Pulled SERP data for keyword. Found ${serp.results.length} top ranking competitors.`);
   } catch (e) {
      pushLog(`Skipped SERP live data (Serper might not be configured, or error). Using purely AI for drafting.`);
   }
@@ -61,12 +61,12 @@ Return ONLY the raw keyword phrase, no formatting, no quotes.`;
     contentHtml: content.htmlContent,
     isDraft: false,
   });
-  pushLog(`Published successfully! URL: ${post.url}`);
+  pushLog(`Published successfully! URL: ${post.url || ""}`);
 
   // Save to DB
   await run(
     `INSERT INTO posts (blog_id, title, url, blogger_post_id, stage, brief_md) VALUES (?, ?, ?, ?, ?, ?)`,
-    [blogId, content.title, post.url, post.id, "published", `Automated post generation for: ${keyword}`]
+    [blogId, content.title, post.url || "", post.id || "", "published", `Automated post generation for: ${keyword}`]
   );
 
   // 3. Auto check blogs fix issues / update

@@ -68,9 +68,17 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) return;
+      const isAllowed =
+        origin === window.location.origin ||
+        origin.endsWith('.run.app') ||
+        origin.includes('localhost') ||
+        origin.endsWith('.vercel.app');
+
+      if (!isAllowed) return;
+
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         fetchSystemStatus();
+        fetchBlogs();
       }
     };
     window.addEventListener('message', handleMessage);
@@ -80,8 +88,19 @@ export const App: React.FC = () => {
   const handleConnectGoogle = async () => {
     try {
       const response = await fetch('/api/auth/url');
-      if (!response.ok) throw new Error('Failed to get auth URL');
+      if (!response.ok) {
+        let errorMsg = `Server returned HTTP ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.error) errorMsg = errData.error;
+        } catch {
+          const text = await response.text().catch(() => '');
+          if (text) errorMsg = text.slice(0, 150);
+        }
+        throw new Error(errorMsg);
+      }
       const { url } = await response.json();
+      if (!url) throw new Error("No authorization URL returned by server");
       
       const authWindow = window.open(url, 'oauth_popup', 'width=600,height=700');
       if (!authWindow) alert('Please allow popups for this site to connect your Google account.');

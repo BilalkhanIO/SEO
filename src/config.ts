@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 dotenv.config({ override: true });
 
@@ -30,14 +31,36 @@ export interface AppConfig {
 }
 
 export function loadConfig(): AppConfig {
-  const dataDir = path.resolve(process.cwd(), "data");
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT);
+  
+  let dataDir = path.resolve(process.cwd(), "data");
+  if (isServerless) {
+    dataDir = path.join(os.tmpdir(), "seo-data");
+  }
+
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+  } catch {
+    dataDir = path.join(os.tmpdir(), "seo-data");
+    try {
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    } catch {
+      // Ignore if cannot create
+    }
+  }
   
   const defaultApiKey = "AIzaSyDj5LeNFgrN8M4usW1mVPhj_lCFDTMR-9A";
   const defaultClientId = "986619466549-o6hntm2g2r40cum796eem9vqjjvehfbd.apps.googleusercontent.com";
 
+  let defaultDbUrl = "file:./data/seo.db";
+  if (isServerless) {
+    defaultDbUrl = `file:${path.join(dataDir, "seo.db")}`;
+  }
+
   return {
-    databaseUrl: cleanEnv(process.env.DATABASE_URL) || "file:./data/seo.db",
+    databaseUrl: cleanEnv(process.env.DATABASE_URL) || defaultDbUrl,
     databaseAuthToken: cleanEnv(process.env.DATABASE_AUTH_TOKEN),
     google: {
       clientId: cleanEnv(process.env.GOOGLE_CLIENT_ID) || defaultClientId,

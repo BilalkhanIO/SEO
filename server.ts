@@ -21,19 +21,24 @@ import {
   generateAutoBlogPost,
 } from "./src/ai/gemini.js";
 
-async function startServer() {
+export function createApp() {
   const app = express();
-  const PORT = 3000;
-
+  app.set("trust proxy", 1);
   app.use(express.json({ limit: "10mb" }));
 
-  // Auto-run migrations on boot
-  try {
-    await migrate();
-    console.log("Database initialized successfully.");
-  } catch (err) {
-    console.warn("Database initialization warning:", err);
-  }
+  // Auto-run migrations lazily
+  let migrated = false;
+  app.use(async (req, res, next) => {
+    if (!migrated) {
+      migrated = true;
+      try {
+        await migrate();
+      } catch (err) {
+        console.warn("Database initialization warning:", err);
+      }
+    }
+    next();
+  });
 
   /* ------------------- API ROUTES ------------------- */
 
@@ -53,15 +58,18 @@ async function startServer() {
   // Auth Flows
   app.get("/api/auth/url", (req, res) => {
     try {
-      const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+      const host = (req.headers["x-forwarded-host"] as string) || req.get("host");
+      const redirectUri = `${proto}://${host}/api/auth/google/callback`;
       const client = getOAuthClient(redirectUri);
       const url = client.generateAuthUrl({
         access_type: "offline",
         scope: SCOPES,
         prompt: "consent",
       });
-      res.json({ url });
+      res.json({ url, redirectUri });
     } catch (err: any) {
+      console.error("Auth URL generation error:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -72,7 +80,9 @@ async function startServer() {
       if (!code) {
         return res.status(400).send("No code provided.");
       }
-      const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+      const host = (req.headers["x-forwarded-host"] as string) || req.get("host");
+      const redirectUri = `${proto}://${host}/api/auth/google/callback`;
       const client = getOAuthClient(redirectUri);
       const { tokens } = await client.getToken(code);
       storeTokens(tokens);
@@ -88,11 +98,12 @@ async function startServer() {
                 window.location.href = '/';
               }
             </script>
-            <p>Authentication successful. You can close this window.</p>
+            <p style="font-family: sans-serif; padding: 24px; text-align: center;">Authentication successful! You can close this window.</p>
           </body>
         </html>
       `);
     } catch (err: any) {
+      console.error("OAuth callback error:", err);
       res.status(500).send("Authentication error: " + err.message);
     }
   });
@@ -843,6 +854,13 @@ async function startServer() {
     }
   });
 
+  return app;
+}
+
+export async function startServer() {
+  const app = createApp();
+  const PORT = 3000;
+
   /* ------------------- FRONTEND / VITE ------------------- */
 
   if (process.env.NODE_ENV !== "production") {
@@ -864,4 +882,7 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+// Only auto-start if run directly
+if (process.env.VERCEL !== "1" && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  startServer().catch(console.error);
+}

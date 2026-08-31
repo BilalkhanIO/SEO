@@ -24,15 +24,19 @@ function readStoredTokens(): Credentials | null {
 }
 
 export function storeTokens(tokens: Credentials): void {
-  const existing = readStoredTokens() || {};
-  fs.writeFileSync(TOKENS_PATH(), JSON.stringify({ ...existing, ...tokens }, null, 2));
+  try {
+    const existing = readStoredTokens() || {};
+    fs.writeFileSync(TOKENS_PATH(), JSON.stringify({ ...existing, ...tokens }, null, 2));
+  } catch (err) {
+    console.warn("Notice: Stored tokens could not be written to filesystem (serverless environment):", err);
+  }
 }
 
 export function getOAuthClient(redirectUri?: string): InstanceType<typeof google.auth.OAuth2> {
   const cfg = loadConfig();
   if (!cfg.google.clientId || !cfg.google.clientSecret) {
     throw new Error(
-      "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing. Copy .env.example to .env and fill them."
+      "GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing. Please add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your Vercel/Hosting Environment Variables."
     );
   }
   const client = new google.auth.OAuth2(
