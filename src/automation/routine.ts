@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 import { loadConfig } from "../config.js";
 import { run, all } from "../store.js";
 import * as blogger from "../google/blogger.js";
@@ -9,14 +8,9 @@ import {
   generateAutoBlogPost,
   fixAndEnrichBlogPost,
   generatePolicyPage,
+  safeGenerateContent,
 } from "../ai/gemini.js";
 import { fetchSerp } from "../serp/serp.js";
-
-function getAi() {
-  const cfg = loadConfig();
-  if (!cfg.geminiApiKey) throw new Error("Gemini API key is required");
-  return new GoogleGenAI({ apiKey: cfg.geminiApiKey });
-}
 
 export interface AutoPilotLog {
   timestamp: string;
@@ -144,6 +138,9 @@ export async function run360AutoPilot(
     const posts = await blogger.listPosts(blog.blogger_blog_id, 25, "LIVE");
     metrics.postsAudited = posts.length;
     pushLog("CONTENT", `Auditing ${posts.length} published posts for word count, headings, image ALT tags, and FAQs.`, "info");
+    
+    // Build context of recent posts for internal linking
+    const internalLinksContext = posts.map(p => ({ title: p.title || "", url: p.url || "" })).filter(p => p.url);
 
     if (options.autoFixThinContent !== false) {
       for (const p of posts) {
@@ -158,10 +155,11 @@ export async function run360AutoPilot(
           try {
             const postDetail = await blogger.getPost(blog.blogger_blog_id, p.bloggerPostId);
             if (postDetail.content) {
-              const enriched = await fixAndEnrichBlogPost(postDetail.content, p.title);
+              const enriched = await fixAndEnrichBlogPost(postDetail.content, p.title, undefined, internalLinksContext);
               await blogger.updatePost(blog.blogger_blog_id, p.bloggerPostId, {
                 title: enriched.improvedTitle || p.title,
                 content: enriched.improvedHtml,
+                customMetaData: enriched.searchDescription,
               });
 
               metrics.postsEnriched++;
@@ -222,12 +220,27 @@ export async function run360AutoPilot(
     // 5. Automated Fresh Post Discovery & Publishing
     if (options.publishNewArticle !== false) {
       pushLog("PUBLISH", "Step 4: Researching high-demand long-tail keyword for fresh publishing...", "info");
-      const ai = getAi();
+      
+      let topAnalyticsTopics: string[] = [];
+      if (blog.ga4_property_id) {
+        pushLog("PUBLISH", `Analyzing Google Analytics top pages to guide topic generation...`, "info");
+        try {
+          const topPages = await analytics.getGa4TopPages(blog.ga4_property_id, 10);
+          topAnalyticsTopics = topPages.map(p => p.pageTitle).filter(Boolean).slice(0, 5);
+          if (topAnalyticsTopics.length > 0) {
+            pushLog("PUBLISH", `Found ${topAnalyticsTopics.length} top topics from GA4 for topic context.`, "info");
+          }
+        } catch (err: any) {
+          pushLog("PUBLISH", `Skipping GA4 topic context: ${err.message}`, "info");
+        }
+      }
+
       const topicPrompt = `Generate exactly ONE highly specific, low-competition, high-search-intent long-tail keyword for a website in the "${niche}" niche.
+${topAnalyticsTopics.length > 0 ? `To align with proven high-traffic content, consider relating the keyword to these current top topics: ${topAnalyticsTopics.join(", ")}.` : ""}
 Return ONLY the raw keyword string, no quotes, no formatting.`;
 
-      const kwRes = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+      const kwRes = await safeGenerateContent({
+        preferredModel: "gemini-2.5-flash",
         contents: topicPrompt,
       });
 
@@ -244,8 +257,8 @@ Return ONLY the raw keyword string, no quotes, no formatting.`;
         pushLog("PUBLISH", "SERP live data skipped. Proceeding with Gemini 3.1 Pro content synthesis.", "info");
       }
 
-      pushLog("PUBLISH", `Writing 1,500+ word comprehensive article with FAQ Schema and Comparison Table...`, "info");
-      const newPostContent = await generateAutoBlogPost(targetKeyword, niche);
+      pushLog("PUBLISH", `Writing 1,500+ word comprehensive article with FAQ Schema, Comparison Table, and Internal Links...`, "info");
+      const newPostContent = await generateAutoBlogPost(targetKeyword, niche, internalLinksContext, topAnalyticsTopics);
 
       pushLog("PUBLISH", `Generated Title: "${newPostContent.title}". Publishing LIVE to Blogger...`, "info");
       const published = await blogger.insertPost({
@@ -253,6 +266,7 @@ Return ONLY the raw keyword string, no quotes, no formatting.`;
         title: newPostContent.title,
         contentHtml: newPostContent.htmlContent,
         labels: newPostContent.tags || [niche],
+        customMetaData: newPostContent.searchDescription,
         isDraft: false,
       });
 

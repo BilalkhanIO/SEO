@@ -65,6 +65,7 @@ export async function insertPost(opts: {
   title: string;
   contentHtml: string;
   labels?: string[];
+  customMetaData?: string;
   isDraft?: boolean;
 }) {
   const res = await api().posts.insert({
@@ -74,6 +75,7 @@ export async function insertPost(opts: {
       title: opts.title,
       content: opts.contentHtml,
       labels: opts.labels,
+      customMetaData: opts.customMetaData,
     },
   });
   return res.data;
@@ -82,7 +84,7 @@ export async function insertPost(opts: {
 export async function updatePost(
   blogId: string,
   postId: string,
-  patch: { title?: string; content?: string; labels?: string[] }
+  patch: { title?: string; content?: string; labels?: string[]; customMetaData?: string }
 ) {
   const res = await api().posts.patch({ blogId, postId, requestBody: patch });
   return res.data;

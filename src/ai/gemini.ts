@@ -25,7 +25,7 @@ function getAiClient(): GoogleGenAI {
 /**
  * Robust wrapper with exponential backoff and model fallbacks for 503 / 429 errors
  */
-async function safeGenerateContent(params: {
+export async function safeGenerateContent(params: {
   preferredModel?: string;
   contents: string;
   config?: any;
@@ -54,8 +54,15 @@ async function safeGenerateContent(params: {
       } catch (err: any) {
         lastError = err;
         const msg = String(err?.message || err?.status || "");
-        // If model not found (404) or quota is 0, skip this model immediately without retrying
-        if (msg.includes("404") || msg.includes("NOT_FOUND") || msg.includes("limit: 0") || msg.includes("RESOURCE_EXHAUSTED")) {
+        // If model not found (404), limit reached (429/RESOURCE_EXHAUSTED), or unsupported, skip to next model immediately
+        if (
+          msg.includes("404") ||
+          msg.includes("NOT_FOUND") ||
+          msg.includes("limit:") ||
+          msg.includes("Quota exceeded") ||
+          msg.includes("RESOURCE_EXHAUSTED") ||
+          msg.includes("not available")
+        ) {
           break;
         }
         const isTransient = msg.includes("503") || msg.includes("429") || msg.includes("UNAVAILABLE") || msg.includes("high demand");
@@ -166,11 +173,14 @@ Respond ONLY in valid JSON format:
  */
 export async function generateFullBlogPost(
   keyword: string,
-  niche?: string
-): Promise<{ title: string; htmlContent: string; tags: string[] }> {
+  niche?: string,
+  internalLinks?: { title: string; url: string }[],
+  topAnalyticsTopics?: string[]
+): Promise<{ title: string; htmlContent: string; tags: string[]; searchDescription: string }> {
   const prompt = `You are a world-class AI Content Writer, SEO Specialist, and AdSense Monetization Expert.
 Write a comprehensive, engaging, highly authoritative, and fully optimized blog post targeting the keyword: "${keyword}".
 ${niche ? `Niche: ${niche}` : ""}
+${topAnalyticsTopics && topAnalyticsTopics.length > 0 ? `Your blog's highest traffic topics are currently: ${topAnalyticsTopics.join(", ")}. If possible, lightly frame or relate the content to these proven high-traffic areas.` : ""}
 
 Content Requirements:
 1. Provide a click-worthy SEO Title (H1 equivalent, under 60 characters).
@@ -181,12 +191,23 @@ Content Requirements:
 6. Include a rich "Frequently Asked Questions" (FAQ) section with 4-5 high-intent questions and structured answers.
 7. Embed a valid Schema.org FAQPage and BlogPosting JSON-LD script at the bottom of the HTML content.
 8. Provide 3-5 relevant Blogger category tags/labels.
+9. Provide a highly optimized SEO search description (meta description) under 150 characters.
+10. EXTERNAL LINKING: Include 1-2 outbound links to high-authority, non-competing external sources (e.g., Wikipedia, official documentation, reputable industry journals) using descriptive anchor text.
+${
+  internalLinks && internalLinks.length > 0
+    ? `\n11. CRITICAL SEO REQUIREMENT: Contextually weave 1 to 3 internal links into the body paragraphs using appropriate anchor text. You may choose from these available related posts:\n${internalLinks
+        .slice(0, 15)
+        .map((link) => `- Title: "${link.title}" | URL: ${link.url}`)
+        .join("\n")}\nFormat the links properly as <a href="URL">anchor text</a>.`
+    : ""
+}
 
 Respond ONLY in valid JSON format:
 {
   "title": "Your SEO Title Here",
   "htmlContent": "<div class=\"blog-post\">...<h2>...</h2>...<script type=\"application/ld+json\">...</script></div>",
-  "tags": ["Tag1", "Tag2", "Tag3"]
+  "tags": ["Tag1", "Tag2", "Tag3"],
+  "searchDescription": "A short, compelling summary of the post for search engines."
 }`;
 
   const response = await safeGenerateContent({
@@ -210,11 +231,13 @@ Respond ONLY in valid JSON format:
 export async function fixAndEnrichBlogPost(
   currentHtml: string,
   title: string,
-  keyword?: string
+  keyword?: string,
+  internalLinks?: { title: string; url: string }[]
 ): Promise<{
   improvedTitle: string;
   improvedHtml: string;
   changelog: string[];
+  searchDescription: string;
 }> {
   const prompt = `You are an SEO Content Optimizer and AdSense Approval Specialist.
 Optimize, rewrite, and significantly expand the following existing Blogger post to fix all content quality and ranking issues.
@@ -232,6 +255,16 @@ Your Task:
 5. Fix image tags by ensuring all <img> tags have descriptive 'alt="..."' attributes.
 6. Add an informative Comparison Table or Step-by-Step checklist.
 7. Return clean HTML ready for Google Blogger without markdown wrappers.
+8. Provide a highly optimized SEO search description (meta description) under 150 characters based on the expanded content.
+9. EXTERNAL LINKING: Include 1-2 outbound links to high-authority, non-competing external sources (e.g., Wikipedia, official documentation, reputable industry journals) using descriptive anchor text.
+${
+  internalLinks && internalLinks.length > 0
+    ? `\n10. CRITICAL SEO REQUIREMENT: Contextually weave 1 to 3 internal links into the expanded body paragraphs using appropriate anchor text. You may choose from these available related posts:\n${internalLinks
+        .slice(0, 15)
+        .map((link) => `- Title: "${link.title}" | URL: ${link.url}`)
+        .join("\n")}\nFormat the links properly as <a href="URL">anchor text</a>.`
+    : ""
+}
 
 Respond ONLY in valid JSON:
 {
@@ -243,7 +276,8 @@ Respond ONLY in valid JSON:
     "Added structured FAQ section with Schema.org JSON-LD",
     "Injected descriptive ALT attributes to all images",
     "Inserted comparative analysis table"
-  ]
+  ],
+  "searchDescription": "A short, compelling summary of the updated post for search engines."
 }`;
 
   const response = await safeGenerateContent({
@@ -263,6 +297,7 @@ Respond ONLY in valid JSON:
       improvedTitle: title,
       improvedHtml: currentHtml + "\n<br/>\n" + appendFaq,
       changelog: ["Appended FAQ section to boost semantic ranking density"],
+      searchDescription: `Learn about ${title} in this detailed guide. Read the full post for more insights and FAQs.`
     };
   }
 }
