@@ -171,7 +171,11 @@ kw.command("score <keywordId>")
   .option("--notes <text>")
   .action(async (keywordId: string, o: { relevance: string; intentFit: string; winnable: string; traffic: string; value: string; intent?: string; notes?: string }) => {
     await migrate();
-    const s = [o.relevance, o.intentFit, o.winnable, o.traffic, o.value].map((x) => Math.max(0, Math.min(2, parseInt(x))));
+    const raw = [o.relevance, o.intentFit, o.winnable, o.traffic, o.value];
+    if (raw.some((x) => Number.isNaN(parseInt(x)))) {
+      throw new Error("--relevance, --intent-fit, --winnable, --traffic and --value must all be numbers 0-2");
+    }
+    const s = raw.map((x) => Math.max(0, Math.min(2, parseInt(x))));
     const total = s.reduce((a, b) => a + b, 0);
     await run(
       `UPDATE keywords SET score_relevance=?, score_intent=?, score_winnable=?, score_traffic=?, score_value=?, score_total=?,
@@ -235,11 +239,14 @@ post.command("publish <htmlFile>")
 post.command("schema").description("Generate JSON-LD (Article/FAQ) to paste into the post HTML")
   .requiredOption("--title <t>").requiredOption("--url <u>").requiredOption("--author <a>")
   .option("--description <d>").option("--image <i>").option("--published <iso>", "ISO date", new Date().toISOString())
+  .option("--publisher <name>", "blog/site name for the required Article publisher field")
+  .option("--logo <url>", "publisher logo image URL")
   .option("--faq <file>", "JSON file: [{question, answer}]")
-  .action((o: { title: string; url: string; author: string; description?: string; image?: string; published: string; faq?: string }) => {
+  .action((o: { title: string; url: string; author: string; description?: string; image?: string; published: string; publisher?: string; logo?: string; faq?: string }) => {
     console.log(articleSchema({
       headline: o.title, url: o.url, authorName: o.author,
       description: o.description, imageUrl: o.image, datePublished: o.published,
+      publisherName: o.publisher, publisherLogoUrl: o.logo,
     }));
     if (o.faq) console.log("\n" + faqSchema(JSON.parse(fs.readFileSync(o.faq, "utf8"))));
   });

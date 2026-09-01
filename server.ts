@@ -1,5 +1,7 @@
 import express from "express";
 import path from "path";
+import dns from "node:dns/promises";
+import net from "node:net";
 import { migrate, all, run } from "./src/store.js";
 import { hasCredentials, getOAuthClient, storeTokens, SCOPES } from "./src/google/auth.js";
 import * as gsc from "./src/google/gsc.js";
@@ -23,6 +25,64 @@ import {
   fixAndEnrichBlogPost,
   generatePolicyPage,
 } from "./src/ai/gemini.js";
+
+function isPrivateOrReservedIp(addr: string): boolean {
+  if (net.isIPv4(addr)) {
+    const [a, b] = addr.split(".").map(Number);
+    if (a === 127) return true; // loopback
+    if (a === 10) return true; // private
+    if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata (169.254.169.254)
+    if (a === 172 && b >= 16 && b <= 31) return true; // private
+    if (a === 192 && b === 168) return true; // private
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    if (a === 0) return true; // "this network"
+    return false;
+  }
+  if (net.isIPv6(addr)) {
+    const lower = addr.toLowerCase();
+    if (lower === "::1" || lower === "::") return true; // loopback / unspecified
+    if (lower.startsWith("fe80:")) return true; // link-local
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local (fc00::/7)
+    if (lower.startsWith("::ffff:")) {
+      const v4 = lower.split(":").pop()!;
+      if (net.isIPv4(v4)) return isPrivateOrReservedIp(v4);
+    }
+    return false;
+  }
+  return true; // unrecognized format — fail closed
+}
+
+/**
+ * SSRF guard for user-supplied URLs fetched server-side (scrape-url, audit-robots): only
+ * http/https, and resolve the hostname to reject loopback/private/link-local/metadata IPs
+ * (e.g. 169.254.169.254, 127.0.0.1, 10.0.0.0/8) before the real fetch happens.
+ */
+async function assertPublicHttpTarget(rawUrl: string): Promise<string> {
+  let target: URL;
+  try {
+    target = new URL(rawUrl);
+  } catch {
+    throw new Error("Invalid URL");
+  }
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    throw new Error("Only http/https URLs are allowed");
+  }
+  const hostname = target.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    throw new Error("Requests to localhost are not allowed");
+  }
+
+  const addresses = net.isIP(hostname)
+    ? [hostname]
+    : (await dns.lookup(hostname, { all: true }).catch(() => [])).map((r) => r.address);
+  if (addresses.length === 0) {
+    throw new Error("Could not resolve host");
+  }
+  if (addresses.some(isPrivateOrReservedIp)) {
+    throw new Error("Requests to private/internal/reserved IP ranges are not allowed");
+  }
+  return target.toString();
+}
 
 export function createApp() {
   const app = express();
@@ -207,7 +267,11 @@ export function createApp() {
   // Keywords
   app.get("/api/keywords", async (req, res) => {
     try {
-      const blogId = req.query.blogId ? parseInt(req.query.blogId as string) : undefined;
+      let blogId: number | undefined;
+      if (req.query.blogId) {
+        blogId = parseInt(req.query.blogId as string);
+        if (Number.isNaN(blogId)) return res.status(400).json({ error: "blogId must be a number" });
+      }
       const status = req.query.status as string | undefined;
       let sql = "SELECT * FROM keywords";
       const args: (number | string)[] = [];
@@ -373,7 +437,11 @@ export function createApp() {
         targetId = row.id;
       }
 
-      const scores = [relevance, intentFit, winnable, traffic, value].map((x) => Math.max(0, Math.min(2, parseInt(x || 0))));
+      const rawScores = [relevance, intentFit, winnable, traffic, value];
+      if (rawScores.some((x) => Number.isNaN(parseInt(x)))) {
+        return res.status(400).json({ error: "relevance, intentFit, winnable, traffic and value must all be numbers 0-2" });
+      }
+      const scores = rawScores.map((x) => Math.max(0, Math.min(2, parseInt(x))));
       const total = scores.reduce((a, b) => a + b, 0);
       const status = total >= 6 ? "scored" : "archived";
 
@@ -392,7 +460,11 @@ export function createApp() {
   // Content Pipeline & Posts
   app.get("/api/posts", async (req, res) => {
     try {
-      const blogId = req.query.blogId ? parseInt(req.query.blogId as string) : undefined;
+      let blogId: number | undefined;
+      if (req.query.blogId) {
+        blogId = parseInt(req.query.blogId as string);
+        if (Number.isNaN(blogId)) return res.status(400).json({ error: "blogId must be a number" });
+      }
       let sql = `
         SELECT p.*, k.keyword, k.score_total as keyword_score, b.name as blog_name
         FROM posts p
@@ -522,6 +594,8 @@ export function createApp() {
             imageUrl: data.imageUrl,
             datePublished: data.datePublished || new Date().toISOString(),
             dateModified: data.dateModified,
+            publisherName: data.publisherName,
+            publisherLogoUrl: data.publisherLogoUrl,
           }),
         });
       }
@@ -851,7 +925,14 @@ export function createApp() {
       const { url } = req.body;
       if (!url) return res.status(400).json({ error: "URL is required" });
 
-      const response = await fetch(url, {
+      let safeUrl: string;
+      try {
+        safeUrl = await assertPublicHttpTarget(url);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+
+      const response = await fetch(safeUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
         },
@@ -896,8 +977,15 @@ export function createApp() {
 
       const baseUrl = domain.startsWith("http") ? domain : `https://${domain}`;
       const robotsUrl = new URL("/robots.txt", baseUrl).toString();
-      
-      const response = await fetch(robotsUrl);
+
+      let safeRobotsUrl: string;
+      try {
+        safeRobotsUrl = await assertPublicHttpTarget(robotsUrl);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+
+      const response = await fetch(safeRobotsUrl);
       if (!response.ok) throw new Error(`Failed to fetch robots.txt (HTTP ${response.status})`);
       
       const robotsTxt = await response.text();

@@ -2,11 +2,13 @@
  * The 6 GSC money recipes (playbook §9), run against stored snapshots.
  * `seo track sync` fills gsc_snapshots; these queries turn them into actions.
  */
+import * as cheerio from "cheerio";
 import { all, run } from "../store.js";
 
-// Rough expected CTR by position (organic, 2026 post-AI-Overview baseline).
+// Rough expected CTR by position (playbook §9 Recipe 2: pos1≈25%+, pos3≈10%, pos5≈6%, pos8≈3%;
+// other positions interpolated between those stated anchors).
 const CTR_BENCHMARK: Record<number, number> = {
-  1: 0.22, 2: 0.12, 3: 0.09, 4: 0.06, 5: 0.05, 6: 0.04, 7: 0.03, 8: 0.025, 9: 0.02, 10: 0.018,
+  1: 0.25, 2: 0.15, 3: 0.10, 4: 0.08, 5: 0.06, 6: 0.05, 7: 0.04, 8: 0.03, 9: 0.025, 10: 0.02,
 };
 
 export interface RecipeHit {
@@ -53,11 +55,13 @@ export async function runRecipes(blogId: number): Promise<RecipeHit[]> {
     }
   }
 
-  // Recipe 2 — CTR fixers: ranking ≤10 but CTR below benchmark
+  // Recipe 2 — CTR fixers: position ≤10 AND CTR below benchmark for that position (playbook §9).
+  // Impressions floor reuses Recipe 1's own "meaningful impressions" bar (>100) so a 1-impression
+  // long-tail query with 0 clicks doesn't flood this recipe with statistically meaningless noise.
   for (const r of rows) {
     const pos = Math.round(r.position);
     const bench = CTR_BENCHMARK[pos];
-    if (bench && r.impressions >= 200 && r.ctr < bench * 0.5) {
+    if (bench && r.impressions > 100 && r.ctr < bench) {
       hits.push({
         type: "ctr_fix", page: r.page, query: r.query,
         message: `"${r.query}" ranks ~${pos} but CTR is ${(r.ctr * 100).toFixed(1)}% (benchmark ~${(bench * 100).toFixed(0)}%). Rewrite the title (number/bracket/year/benefit) and search description.`,
@@ -66,19 +70,28 @@ export async function runRecipes(blogId: number): Promise<RecipeHit[]> {
     }
   }
 
-  // Recipe 4 — Second-page queries per post (11–30, impressions): add a section
+  // Recipe 4 — Second-page queries per post (11–30, impressions) that aren't mentioned in the
+  // post text (playbook §9): fetch the live page and only flag queries whose words are missing.
   const byPage = new Map<string, SnapRow[]>();
   for (const r of rows) {
     if (!byPage.has(r.page)) byPage.set(r.page, []);
     byPage.get(r.page)!.push(r);
   }
   for (const [page, prs] of byPage) {
-    const secondPage = prs.filter((r) => r.position > 10 && r.position <= 30 && r.impressions >= 50);
+    const candidates = prs.filter((r) => r.position > 10 && r.position <= 30 && r.impressions >= 50);
+    if (candidates.length === 0) continue;
+
+    const pageText = await fetchPageText(page);
+    // If the page couldn't be fetched, fall back to the unfiltered candidate list rather than
+    // silently dropping the recipe for that page.
+    const secondPage = pageText ? candidates.filter((r) => !isQueryMentioned(r.query, pageText)) : candidates;
+    await new Promise((s) => setTimeout(s, 300)); // polite delay between page fetches
+
     if (secondPage.length >= 3) {
       const qs = secondPage.slice(0, 8).map((r) => r.query).join(" · ");
       hits.push({
         type: "second_page", page,
-        message: `${secondPage.length} queries at position 11–30 with impressions. Add sections covering: ${qs}`,
+        message: `${secondPage.length} queries at position 11–30 not mentioned in the post text. Add sections covering: ${qs}`,
         data: { count: secondPage.length },
       });
     }
@@ -106,6 +119,31 @@ export async function runRecipes(blogId: number): Promise<RecipeHit[]> {
   }
 
   return hits;
+}
+
+/** Fetch a live post page and return its plain lowercase body text, or null if unreachable. */
+async function fetchPageText(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    $("script, style, nav, footer, header, aside").remove();
+    return $("body").text().replace(/\s+/g, " ").trim().toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** A query counts as "mentioned" if all its significant (3+ char) words appear in the page text. */
+function isQueryMentioned(query: string, pageTextLower: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+  if (words.length === 0) return true;
+  return words.every((w) => pageTextLower.includes(w));
 }
 
 function sumByPage(rows: SnapRow[]): Map<string, number> {

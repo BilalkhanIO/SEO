@@ -8,8 +8,12 @@ dotenv.config({ override: true });
 function cleanEnv(val?: string): string | undefined {
   if (!val) return undefined;
   let cleaned = val.trim();
-  if (cleaned.includes("#")) {
-    cleaned = cleaned.split("#")[0].trim();
+  // Only strip an inline "# comment" when the # starts the value or is preceded by whitespace
+  // (the normal .env comment convention) — a bare .includes("#") check would truncate a token
+  // or URL that legitimately contains a "#" (e.g. a fragment or an API key charset that allows it).
+  const commentAt = cleaned.search(/(^|\s)#/);
+  if (commentAt !== -1) {
+    cleaned = cleaned.slice(0, commentAt).trim();
   }
   cleaned = cleaned.replace(/^["']+|["']+$/g, "").trim();
   return cleaned || undefined;

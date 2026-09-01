@@ -12,6 +12,9 @@ export interface ArticleSchemaInput {
   authorUrl?: string;
   datePublished: string; // ISO
   dateModified?: string;
+  /** Google's Article/BlogPosting rich-result guidelines want a publisher (name + logo). */
+  publisherName?: string;
+  publisherLogoUrl?: string;
 }
 
 export function articleSchema(a: ArticleSchemaInput): string {
@@ -27,6 +30,17 @@ export function articleSchema(a: ArticleSchemaInput): string {
       name: a.authorName,
       ...(a.authorUrl ? { url: a.authorUrl } : {}),
     },
+    ...(a.publisherName
+      ? {
+          publisher: {
+            "@type": "Organization",
+            name: a.publisherName,
+            ...(a.publisherLogoUrl
+              ? { logo: { "@type": "ImageObject", url: a.publisherLogoUrl } }
+              : {}),
+          },
+        }
+      : {}),
     datePublished: a.datePublished,
     dateModified: a.dateModified || a.datePublished,
     mainEntityOfPage: { "@type": "WebPage", "@id": a.url },
