@@ -165,7 +165,7 @@ export function createApp() {
     }
   });
 
-  app.post("/api/blogs/sync", async (req, res) => {
+  app.post(["/api/blogs/sync", "/api/blogs/sync-blogger"], async (req, res) => {
     try {
       if (!hasCredentials()) {
         return res.status(400).json({ error: "Google OAuth credentials not configured yet. Run OAuth setup or configure refresh token in .env." });
@@ -185,7 +185,7 @@ export function createApp() {
         );
         synced.push({ name: b.name, url: b.url, bloggerBlogId: b.bloggerBlogId, gscProperty: gscProp });
       }
-      res.json({ success: true, count: synced.length, blogs: synced });
+      res.json({ success: true, count: synced.length, synced: synced.length, blogs: synced });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -553,15 +553,15 @@ export function createApp() {
     }
   });
 
-  app.get("/api/tracking/recipes", async (req, res) => {
+  app.all(["/api/tracking/recipes", "/api/tracking/audit"], async (req, res) => {
     try {
-      const blogId = req.query.blogId ? parseInt(req.query.blogId as string) : undefined;
+      const blogId = req.query.blogId || req.body.blogId ? parseInt(String(req.query.blogId || req.body.blogId)) : undefined;
       if (!blogId) return res.status(400).json({ error: "blogId is required" });
 
       const hits = await runRecipes(blogId);
       const savedCount = await saveAlerts(blogId, hits);
 
-      res.json({ hits, savedCount });
+      res.json({ success: true, hits, savedCount });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -605,12 +605,12 @@ export function createApp() {
   });
 
   // Health & PageSpeed
-  app.post("/api/health/speed", async (req, res) => {
+  app.post(["/api/health/speed", "/api/health/pagespeed"], async (req, res) => {
     try {
       const { url, strategy = "mobile" } = req.body;
       if (!url) return res.status(400).json({ error: "URL is required" });
       const result = await runPageSpeed(url, strategy);
-      res.json(result);
+      res.json({ success: true, data: result, ...result });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -707,6 +707,17 @@ export function createApp() {
       const { id } = req.params;
       const { status, publishedUrl, linkRel, note } = req.body;
       await outreach.setStatus(parseInt(id), status as any, { publishedUrl, linkRel, note });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/outreach/log", async (req, res) => {
+    try {
+      const { prospectId, status, note, publishedUrl, linkRel } = req.body;
+      if (!prospectId || !status) return res.status(400).json({ error: "prospectId and status are required" });
+      await outreach.setStatus(parseInt(prospectId), status as any, { publishedUrl, linkRel, note });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -72,4 +72,45 @@ export function loadConfig(): AppConfig {
   };
 }
 
+export function updateRuntimeConfig(updates: {
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRefreshToken?: string;
+  geminiApiKey?: string;
+  serperApiKey?: string;
+  pagespeedApiKey?: string;
+}): void {
+  if (updates.googleClientId !== undefined) process.env.GOOGLE_CLIENT_ID = updates.googleClientId;
+  if (updates.googleClientSecret !== undefined) process.env.GOOGLE_CLIENT_SECRET = updates.googleClientSecret;
+  if (updates.googleRefreshToken !== undefined) process.env.GOOGLE_REFRESH_TOKEN = updates.googleRefreshToken;
+  if (updates.geminiApiKey !== undefined) process.env.GEMINI_API_KEY = updates.geminiApiKey;
+  if (updates.serperApiKey !== undefined) process.env.SERPER_API_KEY = updates.serperApiKey;
+  if (updates.pagespeedApiKey !== undefined) process.env.PAGESPEED_API_KEY = updates.pagespeedApiKey;
+
+  try {
+    const envPath = path.resolve(process.cwd(), ".env");
+    if (fs.existsSync(envPath)) {
+      let content = fs.readFileSync(envPath, "utf8");
+      const setVar = (key: string, val?: string) => {
+        if (val === undefined) return;
+        const regex = new RegExp(`^${key}=.*$`, "m");
+        if (regex.test(content)) {
+          content = content.replace(regex, `${key}="${val}"`);
+        } else {
+          content += `\n${key}="${val}"`;
+        }
+      };
+      if (updates.googleClientId !== undefined) setVar("GOOGLE_CLIENT_ID", updates.googleClientId);
+      if (updates.googleClientSecret !== undefined) setVar("GOOGLE_CLIENT_SECRET", updates.googleClientSecret);
+      if (updates.googleRefreshToken !== undefined) setVar("GOOGLE_REFRESH_TOKEN", updates.googleRefreshToken);
+      if (updates.geminiApiKey !== undefined) setVar("GEMINI_API_KEY", updates.geminiApiKey);
+      if (updates.serperApiKey !== undefined) setVar("SERPER_API_KEY", updates.serperApiKey);
+      if (updates.pagespeedApiKey !== undefined) setVar("PAGESPEED_API_KEY", updates.pagespeedApiKey);
+      fs.writeFileSync(envPath, content, "utf8");
+    }
+  } catch (err) {
+    console.warn("Notice: Could not write to .env file:", err);
+  }
+}
+
 export const TOKENS_PATH = () => path.join(loadConfig().dataDir, "google-tokens.json");

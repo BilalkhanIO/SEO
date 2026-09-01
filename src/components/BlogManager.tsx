@@ -77,7 +77,7 @@ export const BlogManager: React.FC<BlogManagerProps> = ({
       const res = await fetch("/api/blogs/sync-blogger", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
-        alert(`Synced ${data.synced} blogs from Google Blogger account!`);
+        alert(`Synced ${data.synced ?? data.count ?? 0} blogs from Google Blogger account!`);
         onRefreshBlogs();
       } else {
         alert(data.error || "Failed to sync. Make sure Google OAuth credentials are authenticated.");
