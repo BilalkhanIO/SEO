@@ -134,8 +134,10 @@ export const App: React.FC = () => {
       if (res.ok) {
         const data: Blog[] = await res.json();
         setBlogs(data);
-        if (data.length > 0 && !currentBlog) {
-          setCurrentBlog(data[0]);
+        if (data.length > 0) {
+          // Re-sync the already-selected blog with its freshly-fetched row (e.g. after
+          // connecting a GA4/AdSense account) instead of only picking one when none was set.
+          setCurrentBlog((prev) => (prev ? data.find((b) => b.id === prev.id) || prev : data[0]));
         }
       }
     } catch (err) {
@@ -433,6 +435,7 @@ export const App: React.FC = () => {
           <GoogleEcosystem
             currentBlog={currentBlog}
             onNavigateToTab={(tab) => setActiveTab(tab)}
+            onRefreshBlogs={fetchBlogs}
           />
         )}
 

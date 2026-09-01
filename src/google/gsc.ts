@@ -204,12 +204,23 @@ export async function listSitemaps(siteUrl: string) {
   }
 }
 
+/**
+ * Notify Google's Indexing API about a URL. NOTE: Google documents this API as
+ * intended only for pages marked up with JobPosting/BroadcastEvent structured data —
+ * for regular blog posts, submissions are generally accepted (200 OK) but have little
+ * to no measurable effect on crawl priority. Treat this as a low-cost nudge, not a
+ * substitute for the playbook §7 fixes (sitemap submission, internal links, content
+ * quality) which are what actually gets ordinary posts indexed.
+ */
 export async function requestGoogleIndexing(
   url: string,
   type: "URL_UPDATED" | "URL_DELETED" = "URL_UPDATED"
 ): Promise<any> {
   const auth = getOAuthClient() as any;
   const token = await auth.getAccessToken();
+  if (!token?.token) {
+    throw new Error("Not authenticated with Google (no access token) — run `seo auth login` or set GOOGLE_REFRESH_TOKEN.");
+  }
 
   const res = await fetch("https://indexing.googleapis.com/v3/urlNotifications:publish", {
     method: "POST",
@@ -225,6 +236,11 @@ export async function requestGoogleIndexing(
 
   if (!res.ok) {
     const errText = await res.text();
+    if (res.status === 403 && /insufficient|scope/i.test(errText)) {
+      throw new Error(
+        `Indexing API Error: 403 insufficient permissions — the stored Google login may predate the "indexing" OAuth scope. Re-run \`seo auth login\` to re-authorize. Raw: ${errText}`
+      );
+    }
     throw new Error(`Indexing API Error: ${res.status} ${errText}`);
   }
 

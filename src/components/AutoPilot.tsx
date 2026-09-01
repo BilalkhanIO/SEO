@@ -33,6 +33,8 @@ interface AutoPilotMetrics {
   postsEnriched: number;
   sitemapsSubmitted: number;
   urlsIndexed: number;
+  postsIndexChecked?: number;
+  postsAlreadyIndexed?: number;
   newPostPublished?: string;
   adsenseReadinessScore: number;
 }
@@ -408,7 +410,11 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
           <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm col-span-2 sm:col-span-1">
             <span className="text-[11px] text-stone-400 font-medium">URLs Indexed</span>
             <p className="text-xl sm:text-2xl font-extrabold text-stone-100 font-mono mt-1">{metrics360.urlsIndexed}</p>
-            <span className="text-[10px] text-purple-400 mt-0.5 block font-mono">Instant Google Indexing</span>
+            <span className="text-[10px] text-purple-400 mt-0.5 block font-mono">
+              {typeof metrics360.postsIndexChecked === "number"
+                ? `${metrics360.postsIndexChecked} posts checked, ${metrics360.postsAlreadyIndexed ?? 0} already indexed`
+                : "Instant Google Indexing"}
+            </span>
           </div>
         </div>
       )}
@@ -564,13 +570,23 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
         </form>
 
         {genResult && (
-          <div className="mt-4 bg-stone-950 border border-emerald-500/30 rounded-2xl p-4">
-            <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold mb-1">
-              <CheckCircle2 className="w-4 h-4" /> Published Successfully to Blogger!
+          <div className={`mt-4 bg-stone-950 border rounded-2xl p-4 ${genResult.seoWarning ? "border-amber-500/30" : "border-emerald-500/30"}`}>
+            <div className={`flex items-center gap-2 text-xs font-semibold mb-1 ${genResult.seoWarning ? "text-amber-400" : "text-emerald-400"}`}>
+              <CheckCircle2 className="w-4 h-4" />
+              {genResult.isDraft
+                ? genResult.seoWarning
+                  ? "Saved as DRAFT — failed the SEO gate, review before publishing"
+                  : "Saved as Draft to Blogger"
+                : "Published Successfully to Blogger!"}
             </div>
             <p className="text-xs text-stone-300 font-medium">{genResult.title || genResult.keyword}</p>
             {typeof genResult.wordCount === "number" && (
               <p className="text-[11px] text-stone-500 mt-0.5 font-mono">{genResult.wordCount} words</p>
+            )}
+            {genResult.seoWarning && (
+              <pre className="text-[11px] text-amber-300/90 mt-2 p-2.5 rounded-lg bg-stone-900 border border-amber-500/20 whitespace-pre-wrap font-mono">
+                {genResult.seoWarning}
+              </pre>
             )}
             {genResult.postUrl && (
               <a

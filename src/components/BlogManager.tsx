@@ -28,10 +28,25 @@ export const BlogManager: React.FC<BlogManagerProps> = ({
   const [url, setUrl] = useState("");
   const [bloggerBlogId, setBloggerBlogId] = useState("");
   const [gscProperty, setGscProperty] = useState("");
+  const [ga4Property, setGa4Property] = useState("");
+  const [adsenseAccount, setAdsenseAccount] = useState("");
   const [isCustomDomain, setIsCustomDomain] = useState(false);
   const [niche, setNiche] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSyncingBlogger, setIsSyncingBlogger] = useState(false);
+  const [gaPropertyOptions, setGaPropertyOptions] = useState<{ propertyId: string; displayName: string }[]>([]);
+  const [adsenseAccountOptions, setAdsenseAccountOptions] = useState<{ name: string; displayName: string }[]>([]);
+
+  React.useEffect(() => {
+    fetch("/api/analytics/properties")
+      .then((r) => r.json())
+      .then((d) => setGaPropertyOptions(Array.isArray(d) ? d : []))
+      .catch(() => {});
+    fetch("/api/adsense/accounts")
+      .then((r) => r.json())
+      .then((d) => setAdsenseAccountOptions(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
 
   const handleCreateBlog = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,6 +62,8 @@ export const BlogManager: React.FC<BlogManagerProps> = ({
           url: url.trim(),
           bloggerBlogId: bloggerBlogId.trim() || null,
           gscProperty: gscProperty.trim() || null,
+          ga4Property: ga4Property || null,
+          adsenseAccount: adsenseAccount || null,
           isCustomDomain,
           niche: niche.trim() || null,
         }),
@@ -58,6 +75,8 @@ export const BlogManager: React.FC<BlogManagerProps> = ({
         setUrl("");
         setBloggerBlogId("");
         setGscProperty("");
+        setGa4Property("");
+        setAdsenseAccount("");
         setNiche("");
         onRefreshBlogs();
       } else {
@@ -164,9 +183,19 @@ export const BlogManager: React.FC<BlogManagerProps> = ({
                 )}
               </div>
 
-              <div className="pt-3 border-t border-stone-800 flex items-center justify-between text-[11px] text-stone-400">
-                <span>{blog.is_custom_domain ? "Custom Domain" : "BlogSpot Subdomain"}</span>
-                <span className="font-mono">{blog.gsc_property ? "GSC Connected" : "No GSC"}</span>
+              <div className="pt-3 border-t border-stone-800 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] text-stone-400">
+                  <span>{blog.is_custom_domain ? "Custom Domain" : "BlogSpot Subdomain"}</span>
+                  <span className="font-mono">{blog.gsc_property ? "GSC Connected" : "No GSC"}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${blog.ga4_property ? "bg-sky-500/10 text-sky-400" : "bg-stone-800 text-stone-500"}`}>
+                    {blog.ga4_property ? "GA4 Connected" : "No GA4"}
+                  </span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${blog.adsense_account ? "bg-amber-500/10 text-amber-400" : "bg-stone-800 text-stone-500"}`}>
+                    {blog.adsense_account ? "AdSense Connected" : "No AdSense"}
+                  </span>
+                </div>
               </div>
             </div>
           );
@@ -236,6 +265,44 @@ export const BlogManager: React.FC<BlogManagerProps> = ({
                   placeholder="sc-domain:myblog.com or https://myblog.blogspot.com/"
                   className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100 font-mono"
                 />
+              </div>
+
+              <div>
+                <label className="block text-stone-300 font-semibold mb-1">Google Analytics (GA4) Property</label>
+                <select
+                  value={ga4Property}
+                  onChange={(e) => setGa4Property(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100"
+                >
+                  <option value="">— Not connected —</option>
+                  {gaPropertyOptions.map((p) => (
+                    <option key={p.propertyId} value={p.propertyId}>
+                      {p.displayName} ({p.propertyId})
+                    </option>
+                  ))}
+                </select>
+                {gaPropertyOptions.length === 0 && (
+                  <p className="text-[11px] text-stone-500 mt-1">No GA4 properties found — connect Google OAuth with Analytics access first.</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-stone-300 font-semibold mb-1">AdSense Account</label>
+                <select
+                  value={adsenseAccount}
+                  onChange={(e) => setAdsenseAccount(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100"
+                >
+                  <option value="">— Not connected —</option>
+                  {adsenseAccountOptions.map((a) => (
+                    <option key={a.name} value={a.name}>
+                      {a.displayName}
+                    </option>
+                  ))}
+                </select>
+                {adsenseAccountOptions.length === 0 && (
+                  <p className="text-[11px] text-stone-500 mt-1">No AdSense accounts found — connect Google OAuth with AdSense access first.</p>
+                )}
               </div>
 
               <div>

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS blogs (
   blogger_blog_id TEXT,
   gsc_property TEXT,          -- e.g. https://example.com/ or sc-domain:example.com
   ga4_property TEXT,          -- numeric GA4 property id
+  adsense_account TEXT,       -- AdSense account resource name, e.g. accounts/pub-XXXXXXXXXXXXXXXX
   is_custom_domain INTEGER DEFAULT 0,
   niche TEXT,
   created_at TEXT DEFAULT (datetime('now'))
@@ -124,6 +125,19 @@ export async function migrate(): Promise<void> {
     }
   } catch (err) {
     console.error("Migration error:", err);
+  }
+
+  // Additive column migrations for DBs created before this column existed.
+  // "ALTER TABLE ... ADD COLUMN IF NOT EXISTS" isn't valid SQLite syntax, so add the
+  // column and swallow the "duplicate column" error when it's already there.
+  for (const stmt of ["ALTER TABLE blogs ADD COLUMN adsense_account TEXT"]) {
+    try {
+      await db().execute(stmt);
+    } catch (err: any) {
+      if (!/duplicate column/i.test(err?.message || "")) {
+        console.error("Column migration error:", stmt, err?.message);
+      }
+    }
   }
 }
 

@@ -5,6 +5,7 @@ export interface Blog {
   blogger_blog_id: string | null;
   gsc_property: string | null;
   ga4_property: string | null;
+  adsense_account: string | null;
   is_custom_domain: number;
   niche: string | null;
   created_at: string;

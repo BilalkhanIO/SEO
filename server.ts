@@ -8,15 +8,15 @@ import * as gsc from "./src/google/gsc.js";
 import * as blogger from "./src/google/blogger.js";
 import { runPageSpeed } from "./src/google/pagespeed.js";
 import { harvest, suggest } from "./src/keywords/autocomplete.js";
-import { fetchSerp, enrichSerp, briefFromSerp, extractPage } from "./src/serp/serp.js";
-import { validatePost, formatIssues } from "./src/content/validate.js";
+import { fetchSerp, enrichSerp, briefFromSerp, extractPage, competitorContext } from "./src/serp/serp.js";
+import { validatePost, blockingIssues, formatIssues } from "./src/content/validate.js";
 import { articleSchema, faqSchema, howToSchema } from "./src/content/schema.js";
 import { runRecipes, saveAlerts } from "./src/tracking/recipes.js";
 import * as outreach from "./src/outreach/outreach.js";
 import { loadConfig } from "./src/config.js";
 import * as adsense from "./src/google/adsense.js";
 import * as analytics from "./src/google/analytics.js";
-import { runAutomationCycle, run360AutoPilot, generateWithMinWordCount, MIN_WORD_COUNT } from "./src/automation/routine.js";
+import { runAutomationCycle, run360AutoPilot, generateWithMinWordCount, MIN_WORD_COUNT, checkAndFixIndexing } from "./src/automation/routine.js";
 import {
   generateSeoBriefWithGemini,
   generateSeoMetadataWithGemini,
@@ -218,20 +218,38 @@ export function createApp() {
 
   app.post("/api/blogs", async (req, res) => {
     try {
-      const { name, url, bloggerBlogId, gscProperty, isCustomDomain, niche } = req.body;
+      const { name, url, bloggerBlogId, gscProperty, ga4Property, adsenseAccount, isCustomDomain, niche } = req.body;
       if (!url) return res.status(400).json({ error: "URL is required" });
       const isCustom = typeof isCustomDomain === "boolean" ? (isCustomDomain ? 1 : 0) : url.includes("blogspot.com") ? 0 : 1;
-      const id = await run(
-        `INSERT INTO blogs (name, url, blogger_blog_id, gsc_property, is_custom_domain, niche)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(url) DO UPDATE SET
-           name = excluded.name,
-           blogger_blog_id = COALESCE(excluded.blogger_blog_id, blogs.blogger_blog_id),
-           gsc_property = COALESCE(excluded.gsc_property, blogs.gsc_property),
-           is_custom_domain = excluded.is_custom_domain,
-           niche = COALESCE(excluded.niche, blogs.niche)`,
-        [name || url, url, bloggerBlogId || null, gscProperty || null, isCustom, niche || null]
-      );
+
+      // Select-then-branch instead of an ON CONFLICT upsert: a COALESCE(?, url) baked into
+      // the INSERT's VALUES resolves to a concrete non-null string before `excluded.name`
+      // is ever evaluated, so a COALESCE(excluded.name, blogs.name) in the conflict clause
+      // can never actually fall back — a partial update (e.g. just connecting a GA4
+      // property) would silently overwrite the existing name with the blog's own URL.
+      const [existing] = await all<any>("SELECT id FROM blogs WHERE url = ?", [url]);
+      let id: number | bigint | undefined;
+      if (existing) {
+        await run(
+          `UPDATE blogs SET
+             name = COALESCE(?, name),
+             blogger_blog_id = COALESCE(?, blogger_blog_id),
+             gsc_property = COALESCE(?, gsc_property),
+             ga4_property = COALESCE(?, ga4_property),
+             adsense_account = COALESCE(?, adsense_account),
+             is_custom_domain = ?,
+             niche = COALESCE(?, niche)
+           WHERE id = ?`,
+          [name || null, bloggerBlogId || null, gscProperty || null, ga4Property || null, adsenseAccount || null, isCustom, niche || null, existing.id]
+        );
+        id = existing.id;
+      } else {
+        id = await run(
+          `INSERT INTO blogs (name, url, blogger_blog_id, gsc_property, ga4_property, adsense_account, is_custom_domain, niche)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [name || url, url, bloggerBlogId || null, gscProperty || null, ga4Property || null, adsenseAccount || null, isCustom, niche || null]
+        );
+      }
       res.json({ success: true, id });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -746,6 +764,19 @@ export function createApp() {
     }
   });
 
+  // Check every live post's actual GSC index status and request indexing only for the
+  // ones genuinely not indexed (playbook §7), rather than a single on-demand URL check.
+  app.post("/api/health/index-sweep", async (req, res) => {
+    try {
+      const { blogId } = req.body;
+      if (!blogId) return res.status(400).json({ error: "blogId is required" });
+      const sweep = await checkAndFixIndexing(blogId);
+      res.json(sweep);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/health/sitemaps", async (req, res) => {
     try {
       const blogId = req.query.blogId ? parseInt(req.query.blogId as string) : undefined;
@@ -885,9 +916,17 @@ export function createApp() {
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.blogger_blog_id) return res.status(400).json({ error: "Blog not found or lacks a linked Blogger ID" });
 
-      const willBeDraft = isDraft !== false;
+      const wantsLive = isDraft === false;
+
+      let competitorCtx;
+      try {
+        competitorCtx = competitorContext(await enrichSerp(await fetchSerp(keyword), 5));
+      } catch {
+        competitorCtx = undefined;
+      }
+
       const { result: content, wordCount } = await generateWithMinWordCount(
-        () => generateAutoBlogPost(keyword, niche),
+        () => generateAutoBlogPost(keyword, niche, undefined, undefined, competitorCtx),
         (r) => r.htmlContent,
         () => {}, // no live log stream for this single-post endpoint; the retry still happens silently
         `New article ("${keyword}")`
@@ -899,28 +938,42 @@ export function createApp() {
         });
       }
 
+      // SEO pre-publish gate (playbook §4 stage 5). If the user asked for live and it fails,
+      // downgrade to draft for manual review instead of blocking or shipping it non-compliant
+      // — permalink is excluded since Blogger's API has no way to set one anyway.
+      let seoWarning: string | undefined;
+      let publishLive = wantsLive;
+      if (wantsLive) {
+        const blocking = blockingIssues(
+          validatePost({ title: content.title, html: content.htmlContent, searchDescription: content.searchDescription, keyword, siteUrl: blog.url })
+        );
+        if (blocking.length > 0) {
+          publishLive = false;
+          seoWarning = formatIssues(blocking);
+        }
+      }
+
       const post = await blogger.insertPost({
         blogId: blog.blogger_blog_id,
         title: content.title,
         contentHtml: content.htmlContent,
         labels: content.tags,
         customMetaData: content.searchDescription,
-        isDraft: willBeDraft,
+        isDraft: !publishLive,
       });
 
-      if (!willBeDraft) {
-        await run(
-          `INSERT INTO posts (blog_id, title, url, blogger_post_id, stage, brief_md) VALUES (?, ?, ?, ?, ?, ?)`,
-          [blogId, content.title, post.url || "", post.id || "", "published", `Manually generated for keyword: ${keyword}`]
-        );
-      }
+      await run(
+        `INSERT INTO posts (blog_id, title, url, blogger_post_id, stage, brief_md) VALUES (?, ?, ?, ?, ?, ?)`,
+        [blogId, content.title, post.url || "", post.id || "", publishLive ? "published" : "drafted", `Manually generated for keyword: ${keyword}`]
+      );
 
       res.json({
         success: true,
         postUrl: post.url,
         postId: post.id,
-        isDraft: willBeDraft,
+        isDraft: !publishLive,
         wordCount,
+        seoWarning,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to generate auto blog" });
@@ -1242,17 +1295,47 @@ export function createApp() {
       const postData = await blogger.getPost(bloggerBlogId, bloggerPostId);
       if (!postData.content) return res.status(400).json({ error: "Post has no content to fix" });
 
+      const effectiveTitle = title || postData.title || "Blog Post";
+      let competitorCtx;
+      try {
+        competitorCtx = competitorContext(await enrichSerp(await fetchSerp(keyword || effectiveTitle), 5));
+      } catch {
+        competitorCtx = undefined;
+      }
+
       const { result: fixed, wordCount } = await generateWithMinWordCount(
-        () => fixAndEnrichBlogPost(postData.content!, title || postData.title || "Blog Post", keyword),
+        () => fixAndEnrichBlogPost(postData.content!, effectiveTitle, keyword, undefined, competitorCtx),
         (r) => r.improvedHtml,
         () => {}, // no live log stream for this single-post endpoint; the retry still happens silently
-        `Enriching "${title || postData.title || bloggerPostId}"`
+        `Enriching "${effectiveTitle}"`
       );
 
       if (wordCount < MIN_WORD_COUNT) {
         return res.status(422).json({
           error: `Best attempt still only ${wordCount} words (need ${MIN_WORD_COUNT}+). Not publishing thin content — try again.`,
         });
+      }
+
+      // SEO pre-publish gate (playbook §4 stage 5) — this is an already-live post, so on a
+      // real failure skip the update entirely rather than push a non-compliant rewrite live.
+      let siteUrl: string | undefined;
+      try {
+        siteUrl = postData.url ? new URL(postData.url).origin : undefined;
+      } catch {
+        siteUrl = undefined;
+      }
+      const blocking = blockingIssues(
+        validatePost({
+          title: fixed.improvedTitle,
+          html: fixed.improvedHtml,
+          searchDescription: fixed.searchDescription,
+          keyword: keyword || effectiveTitle,
+          siteUrl,
+          permalinkSet: true,
+        })
+      );
+      if (blocking.length > 0) {
+        return res.status(422).json({ error: `Failed the SEO gate:\n${formatIssues(blocking)}` });
       }
 
       const updated = await blogger.updatePost(bloggerBlogId, bloggerPostId, {
