@@ -73,18 +73,30 @@ export async function listAdSenseSites(accountName: string) {
 }
 
 /**
- * List Ad Units created under an account
+ * List Ad Units created under an account.
+ * Ad units are nested under ad clients (accounts/{account}/adclients/{adclient}/adunits),
+ * not directly under the account, so this first resolves the account's ad clients.
  */
 export async function listAdUnits(accountName: string) {
   try {
-    const api: any = getAdSenseApi();
-    const res = await (api.accounts?.adunits || api.accounts?.adUnits || api.accounts?.adclients?.adunits)?.list?.({ parent: accountName }) || { data: {} };
-    return (res.data?.adUnits || []).map((ad: any) => ({
-      name: ad.name || "",
-      displayName: ad.displayName || "Ad Unit",
-      state: ad.state || "ACTIVE",
-      format: ad.contentAdsSettings?.type || "DISPLAY",
-    }));
+    const api = getAdSenseApi();
+    const clientsRes = await api.accounts.adclients.list({ parent: accountName });
+    const adClients = clientsRes.data.adClients || [];
+
+    const units: { name: string; displayName: string; state: string; format: string }[] = [];
+    for (const client of adClients) {
+      if (!client.name) continue;
+      const res = await api.accounts.adclients.adunits.list({ parent: client.name });
+      for (const ad of res.data.adUnits || []) {
+        units.push({
+          name: ad.name || "",
+          displayName: ad.displayName || "Ad Unit",
+          state: ad.state || "ACTIVE",
+          format: ad.contentAdsSettings?.type || "DISPLAY",
+        });
+      }
+    }
+    return units;
   } catch (err: any) {
     console.warn("Notice: Ad units listing error:", err.message);
     return [];

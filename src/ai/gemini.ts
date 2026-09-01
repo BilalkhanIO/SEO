@@ -215,6 +215,9 @@ Respond ONLY in valid JSON format:
     contents: prompt,
     config: {
       responseMimeType: "application/json",
+      // A 1,500+ word article plus FAQ + JSON-LD schema can exceed a model's
+      // default output cap, silently truncating the JSON and shrinking the article.
+      maxOutputTokens: 8192,
     },
   });
 
@@ -285,6 +288,9 @@ Respond ONLY in valid JSON:
     contents: prompt,
     config: {
       responseMimeType: "application/json",
+      // A 1,500+ word article plus FAQ + JSON-LD schema can exceed a model's
+      // default output cap, silently truncating the JSON and shrinking the article.
+      maxOutputTokens: 8192,
     },
   });
 

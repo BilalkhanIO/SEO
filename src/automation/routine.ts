@@ -12,6 +12,36 @@ import {
 } from "../ai/gemini.js";
 import { fetchSerp } from "../serp/serp.js";
 
+/** Below this, Blogger/AdSense treat a post as thin content (matches the audit's own "800+ words" guidance). */
+const MIN_WORD_COUNT = 800;
+const MAX_GENERATION_ATTEMPTS = 3;
+
+/**
+ * Gemini's requested word count ("1,500+ words") isn't enforced by the model — weaker
+ * fallback models in particular can return much shorter drafts. Regenerate up to
+ * MAX_GENERATION_ATTEMPTS times and keep the longest result, so a thin draft never
+ * gets published just because the first attempt came back short.
+ */
+async function generateWithMinWordCount<T>(
+  generate: () => Promise<T>,
+  getHtml: (result: T) => string,
+  pushLog: (message: string, type?: AutoPilotLog["type"]) => void,
+  label: string
+): Promise<{ result: T; wordCount: number }> {
+  let best: { result: T; wordCount: number } | null = null;
+  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+    const result = await generate();
+    const wordCount = blogger.auditPostContent(getHtml(result) || "", "").wordCount;
+    if (!best || wordCount > best.wordCount) best = { result, wordCount };
+    if (wordCount >= MIN_WORD_COUNT) return best;
+    pushLog(
+      `${label}: attempt ${attempt}/${MAX_GENERATION_ATTEMPTS} produced only ${wordCount} words (need ${MIN_WORD_COUNT}+). Retrying...`,
+      "warn"
+    );
+  }
+  return best!;
+}
+
 export interface AutoPilotLog {
   timestamp: string;
   stage: "INIT" | "ADSENSE" | "CONTENT" | "GSC" | "INDEXING" | "PUBLISH" | "COMPLETE";
@@ -157,7 +187,22 @@ export async function run360AutoPilot(
             if (postDetail.content) {
               // Exclude the post being enriched so it can't be told to link to itself
               const linksForThisPost = internalLinksContext.filter((link) => link.url !== p.url);
-              const enriched = await fixAndEnrichBlogPost(postDetail.content, p.title, undefined, linksForThisPost);
+              const { result: enriched, wordCount: enrichedWordCount } = await generateWithMinWordCount(
+                () => fixAndEnrichBlogPost(postDetail.content!, p.title, undefined, linksForThisPost),
+                (r) => r.improvedHtml,
+                (msg, type) => pushLog("CONTENT", msg, type),
+                `Enriching "${p.title}"`
+              );
+
+              if (enrichedWordCount < MIN_WORD_COUNT) {
+                pushLog(
+                  "CONTENT",
+                  `Skipped publishing enrichment for "${p.title}": best attempt still only ${enrichedWordCount} words (need ${MIN_WORD_COUNT}+). Will retry next cycle instead of publishing thin content.`,
+                  "error"
+                );
+                continue;
+              }
+
               await blogger.updatePost(blog.blogger_blog_id, p.bloggerPostId, {
                 title: enriched.improvedTitle || p.title,
                 content: enriched.improvedHtml,
@@ -167,7 +212,7 @@ export async function run360AutoPilot(
               metrics.postsEnriched++;
               pushLog(
                 "CONTENT",
-                `Successfully updated & enriched "${p.title}" on Blogger (search description embedded in JSON-LD structured data). Changelog: ${enriched.changelog.join(", ")}`,
+                `Successfully updated & enriched "${p.title}" on Blogger (${enrichedWordCount} words; search description embedded in JSON-LD structured data). Changelog: ${enriched.changelog.join(", ")}`,
                 "success"
               );
 
@@ -260,36 +305,49 @@ Return ONLY the raw keyword string, no quotes, no formatting.`;
       }
 
       pushLog("PUBLISH", `Writing 1,500+ word comprehensive article with FAQ Schema, Comparison Table, and Internal Links...`, "info");
-      const newPostContent = await generateAutoBlogPost(targetKeyword, niche, internalLinksContext, topAnalyticsTopics);
-
-      pushLog("PUBLISH", `Generated Title: "${newPostContent.title}". Publishing LIVE to Blogger...`, "info");
-      const published = await blogger.insertPost({
-        blogId: blog.blogger_blog_id,
-        title: newPostContent.title,
-        contentHtml: newPostContent.htmlContent,
-        labels: newPostContent.tags || [niche],
-        customMetaData: newPostContent.searchDescription,
-        isDraft: false,
-      });
-
-      const publishedUrl = published.url || "";
-      metrics.newPostPublished = publishedUrl;
-      pushLog("PUBLISH", `Published LIVE successfully! URL: ${publishedUrl}`, "success");
-
-      // Save to database
-      await run(
-        `INSERT INTO posts (blog_id, title, url, blogger_post_id, stage, brief_md) VALUES (?, ?, ?, ?, ?, ?)`,
-        [blogId, newPostContent.title, publishedUrl, published.id || "", "published", `Auto-published for keyword: ${targetKeyword}`]
+      const { result: newPostContent, wordCount: newPostWordCount } = await generateWithMinWordCount(
+        () => generateAutoBlogPost(targetKeyword, niche, internalLinksContext, topAnalyticsTopics),
+        (r) => r.htmlContent,
+        (msg, type) => pushLog("PUBLISH", msg, type),
+        `New article ("${targetKeyword}")`
       );
 
-      // Instant Indexing
-      if (publishedUrl && options.autoIndexUrls !== false) {
-        try {
-          await gsc.requestGoogleIndexing(publishedUrl, "URL_UPDATED");
-          metrics.urlsIndexed++;
-          pushLog("INDEXING", `Notified Google Indexing API for new article: ${publishedUrl}`, "success");
-        } catch (idxErr: any) {
-          pushLog("INDEXING", `Indexing notice for new post: ${idxErr.message}`, "warn");
+      if (newPostWordCount < MIN_WORD_COUNT) {
+        pushLog(
+          "PUBLISH",
+          `Skipped publishing: best attempt for "${targetKeyword}" still only ${newPostWordCount} words (need ${MIN_WORD_COUNT}+). Not publishing thin content — try again next cycle.`,
+          "error"
+        );
+      } else {
+        pushLog("PUBLISH", `Generated Title: "${newPostContent.title}" (${newPostWordCount} words). Publishing LIVE to Blogger...`, "info");
+        const published = await blogger.insertPost({
+          blogId: blog.blogger_blog_id,
+          title: newPostContent.title,
+          contentHtml: newPostContent.htmlContent,
+          labels: newPostContent.tags || [niche],
+          customMetaData: newPostContent.searchDescription,
+          isDraft: false,
+        });
+
+        const publishedUrl = published.url || "";
+        metrics.newPostPublished = publishedUrl;
+        pushLog("PUBLISH", `Published LIVE successfully! URL: ${publishedUrl}`, "success");
+
+        // Save to database
+        await run(
+          `INSERT INTO posts (blog_id, title, url, blogger_post_id, stage, brief_md) VALUES (?, ?, ?, ?, ?, ?)`,
+          [blogId, newPostContent.title, publishedUrl, published.id || "", "published", `Auto-published for keyword: ${targetKeyword}`]
+        );
+
+        // Instant Indexing
+        if (publishedUrl && options.autoIndexUrls !== false) {
+          try {
+            await gsc.requestGoogleIndexing(publishedUrl, "URL_UPDATED");
+            metrics.urlsIndexed++;
+            pushLog("INDEXING", `Notified Google Indexing API for new article: ${publishedUrl}`, "success");
+          } catch (idxErr: any) {
+            pushLog("INDEXING", `Indexing notice for new post: ${idxErr.message}`, "warn");
+          }
         }
       }
     }
