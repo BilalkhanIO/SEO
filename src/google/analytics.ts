@@ -129,11 +129,7 @@ export async function getGa4TrafficSummary(
       averageSessionDuration: Math.round(avgDuration),
       bounceRate: parseFloat((bounceRate * 100).toFixed(1)),
       engagementRate: parseFloat((engagementRate * 100).toFixed(1)),
-      channels: channels.length > 0 ? channels : [
-        { channel: "Organic Search", users: Math.round(activeUsers * 0.7), percentage: 70 },
-        { channel: "Direct", users: Math.round(activeUsers * 0.2), percentage: 20 },
-        { channel: "Social", users: Math.round(activeUsers * 0.1), percentage: 10 },
-      ],
+      channels,
     };
   } catch (err: any) {
     console.warn("Notice: GA4 traffic report fallback:", err.message);

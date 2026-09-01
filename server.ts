@@ -28,6 +28,14 @@ export function createApp() {
   const app = express();
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "10mb" }));
+  // Body-parser leaves req.body as `undefined` (not `{}`) for requests with no
+  // JSON body (e.g. a GET/POST with no Content-Type). Routes below destructure
+  // req.body directly, so without this they'd throw an unhandled TypeError
+  // ("Cannot destructure property ... of undefined") instead of a clean 400.
+  app.use((req, res, next) => {
+    if (req.body === undefined) req.body = {};
+    next();
+  });
 
   // Auto-run migrations lazily
   let migrated = false;
@@ -150,14 +158,19 @@ export function createApp() {
 
   app.post("/api/blogs", async (req, res) => {
     try {
-      const { name, url, gscProperty, niche } = req.body;
+      const { name, url, bloggerBlogId, gscProperty, isCustomDomain, niche } = req.body;
       if (!url) return res.status(400).json({ error: "URL is required" });
-      const isCustom = url.includes("blogspot.com") ? 0 : 1;
+      const isCustom = typeof isCustomDomain === "boolean" ? (isCustomDomain ? 1 : 0) : url.includes("blogspot.com") ? 0 : 1;
       const id = await run(
-        `INSERT INTO blogs (name, url, gsc_property, is_custom_domain, niche)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(url) DO UPDATE SET name = excluded.name, gsc_property = COALESCE(excluded.gsc_property, blogs.gsc_property), niche = COALESCE(excluded.niche, blogs.niche)`,
-        [name || url, url, gscProperty || null, isCustom, niche || null]
+        `INSERT INTO blogs (name, url, blogger_blog_id, gsc_property, is_custom_domain, niche)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(url) DO UPDATE SET
+           name = excluded.name,
+           blogger_blog_id = COALESCE(excluded.blogger_blog_id, blogs.blogger_blog_id),
+           gsc_property = COALESCE(excluded.gsc_property, blogs.gsc_property),
+           is_custom_domain = excluded.is_custom_domain,
+           niche = COALESCE(excluded.niche, blogs.niche)`,
+        [name || url, url, bloggerBlogId || null, gscProperty || null, isCustom, niche || null]
       );
       res.json({ success: true, id });
     } catch (err: any) {
@@ -268,6 +281,12 @@ export function createApp() {
       const { blogId, days = 90, minImpressions = 50 } = req.body;
       if (!blogId) return res.status(400).json({ error: "Blog ID is required" });
 
+      const daysNum = parseInt(String(days), 10);
+      const minImpressionsNum = parseInt(String(minImpressions), 10);
+      if (Number.isNaN(daysNum) || Number.isNaN(minImpressionsNum)) {
+        return res.status(400).json({ error: "days and minImpressions must be numbers" });
+      }
+
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.gsc_property) {
         return res.status(400).json({ error: "Blog has no GSC property configured" });
@@ -276,7 +295,7 @@ export function createApp() {
       const end = new Date();
       end.setDate(end.getDate() - 2);
       const start = new Date(end);
-      start.setDate(start.getDate() - parseInt(String(days)));
+      start.setDate(start.getDate() - daysNum);
 
       const rows = await gsc.queryAnalytics({
         siteUrl: blog.gsc_property,
@@ -287,7 +306,7 @@ export function createApp() {
       });
 
       const candidates = rows
-        .filter((r) => r.impressions >= parseInt(String(minImpressions)) && r.position > 8)
+        .filter((r) => r.impressions >= minImpressionsNum && r.position > 8)
         .sort((a, b) => b.impressions - a.impressions)
         .slice(0, 100);
 
@@ -336,8 +355,23 @@ export function createApp() {
 
   app.post("/api/keywords/score", async (req, res) => {
     try {
-      const { keywordId, relevance, intentFit, winnable, traffic, value, intent, notes } = req.body;
-      if (!keywordId) return res.status(400).json({ error: "Keyword ID required" });
+      const { keywordId, keyword, blogId, relevance, intentFit, winnable, traffic, value, intent, notes } = req.body;
+
+      // Allow scoring a not-yet-stored keyword (e.g. "Save to Repo" from an AI
+      // suggestion list) by keyword text + blogId instead of an existing row id.
+      let targetId = keywordId;
+      if (!targetId) {
+        if (!keyword || !blogId) {
+          return res.status(400).json({ error: "Keyword ID, or keyword + blogId, is required" });
+        }
+        await run(
+          "INSERT INTO keywords (blog_id, keyword, source, status) VALUES (?, ?, 'manual', 'idea') ON CONFLICT(blog_id, keyword) DO NOTHING",
+          [blogId, keyword]
+        );
+        const [row] = await all<any>("SELECT id FROM keywords WHERE blog_id = ? AND keyword = ?", [blogId, keyword]);
+        if (!row) return res.status(500).json({ error: "Failed to create keyword" });
+        targetId = row.id;
+      }
 
       const scores = [relevance, intentFit, winnable, traffic, value].map((x) => Math.max(0, Math.min(2, parseInt(x || 0))));
       const total = scores.reduce((a, b) => a + b, 0);
@@ -346,10 +380,10 @@ export function createApp() {
       await run(
         `UPDATE keywords SET score_relevance=?, score_intent=?, score_winnable=?, score_traffic=?, score_value=?, score_total=?,
          intent = COALESCE(?, intent), notes = COALESCE(?, notes), status = ? WHERE id = ?`,
-        [...scores, total, intent || null, notes || null, status, keywordId]
+        [...scores, total, intent || null, notes || null, status, targetId]
       );
 
-      res.json({ success: true, total, status });
+      res.json({ success: true, id: targetId, total, status });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -447,6 +481,9 @@ export function createApp() {
   app.post("/api/posts/publish", async (req, res) => {
     try {
       const { blogId, title, html, labels, isDraft = true } = req.body;
+      if (!blogId || !title || !html) {
+        return res.status(400).json({ error: "blogId, title and html are required" });
+      }
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.blogger_blog_id) {
         return res.status(400).json({ error: "Blog has no Blogger ID linked" });
@@ -469,6 +506,7 @@ export function createApp() {
   app.post("/api/posts/schema", (req, res) => {
     try {
       const { type, data } = req.body;
+      if (!data) return res.status(400).json({ error: "data is required" });
       if (type === "faq") {
         return res.json({ schema: faqSchema(data.qa || []) });
       } else if (type === "howto") {
@@ -522,13 +560,17 @@ export function createApp() {
   app.post("/api/tracking/sync", async (req, res) => {
     try {
       const { blogId, days = 28 } = req.body;
+      if (!blogId) return res.status(400).json({ error: "blogId is required" });
+      const daysNum = parseInt(String(days), 10);
+      if (Number.isNaN(daysNum)) return res.status(400).json({ error: "days must be a number" });
+
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.gsc_property) return res.status(400).json({ error: "No GSC property linked" });
 
       const end = new Date();
       end.setDate(end.getDate() - 2);
       const start = new Date(end);
-      start.setDate(start.getDate() - parseInt(String(days)));
+      start.setDate(start.getDate() - daysNum);
       const endS = end.toISOString().slice(0, 10);
 
       const rows = await gsc.queryAnalytics({
@@ -539,11 +581,11 @@ export function createApp() {
         rowLimit: 25000,
       });
 
-      await run("DELETE FROM gsc_snapshots WHERE blog_id = ? AND date = ? AND days = ?", [blog.id, endS, parseInt(String(days))]);
+      await run("DELETE FROM gsc_snapshots WHERE blog_id = ? AND date = ? AND days = ?", [blog.id, endS, daysNum]);
       for (const r of rows) {
         await run(
           "INSERT INTO gsc_snapshots (blog_id, date, days, page, query, clicks, impressions, ctr, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [blog.id, endS, parseInt(String(days)), r.keys[0], r.keys[1], r.clicks, r.impressions, r.ctr, r.position]
+          [blog.id, endS, daysNum, r.keys[0], r.keys[1], r.clicks, r.impressions, r.ctr, r.position]
         );
       }
 
@@ -619,6 +661,7 @@ export function createApp() {
   app.post("/api/health/inspect", async (req, res) => {
     try {
       const { blogId, url } = req.body;
+      if (!blogId || !url) return res.status(400).json({ error: "blogId and url are required" });
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.gsc_property) return res.status(400).json({ error: "No GSC property linked" });
 
@@ -645,11 +688,12 @@ export function createApp() {
 
   app.post("/api/health/sitemaps/submit", async (req, res) => {
     try {
-      const { blogId } = req.body;
+      const { blogId, feedpath } = req.body;
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.gsc_property) return res.status(400).json({ error: "No GSC property linked" });
 
-      const feed = blog.url.replace(/\/$/, "") + "/sitemap.xml";
+      const cleanFeedpath = (typeof feedpath === "string" && feedpath.trim()) || "sitemap.xml";
+      const feed = blog.url.replace(/\/$/, "") + "/" + cleanFeedpath.replace(/^\//, "");
       await gsc.submitSitemap(blog.gsc_property, feed);
       res.json({ success: true, feed });
     } catch (err: any) {
@@ -763,24 +807,25 @@ export function createApp() {
     try {
       const { keyword, niche, blogId, isDraft } = req.body;
       if (!keyword || !blogId) return res.status(400).json({ error: "Keyword and blogId are required" });
-      
-      const blog = db.prepare("SELECT * FROM blogs WHERE id = ?").get(blogId) as any;
+
+      const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.blogger_blog_id) return res.status(400).json({ error: "Blog not found or lacks a linked Blogger ID" });
 
+      const willBeDraft = isDraft !== false;
       const content = await generateAutoBlogPost(keyword, niche);
       const post = await blogger.insertPost({
         blogId: blog.blogger_blog_id,
         title: content.title,
         contentHtml: content.htmlContent,
         labels: content.tags,
-        isDraft: isDraft !== false,
+        isDraft: willBeDraft,
       });
 
       res.json({
         success: true,
         postUrl: post.url,
         postId: post.id,
-        isDraft: post.title ? true : false // just an indicator
+        isDraft: willBeDraft,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to generate auto blog" });
@@ -917,6 +962,7 @@ export function createApp() {
       const accountName = req.query.accountName as string;
       const days = parseInt((req.query.days as string) || "30", 10);
       if (!accountName) return res.status(400).json({ error: "accountName query param required" });
+      if (Number.isNaN(days)) return res.status(400).json({ error: "days must be a number" });
       const report = await adsense.getAdSenseReport(accountName, days);
       res.json(report);
     } catch (err: any) {
@@ -1001,6 +1047,7 @@ export function createApp() {
       const propertyId = req.query.propertyId as string;
       const days = parseInt((req.query.days as string) || "30", 10);
       if (!propertyId) return res.status(400).json({ error: "propertyId required" });
+      if (Number.isNaN(days)) return res.status(400).json({ error: "days must be a number" });
       const report = await analytics.getGa4TrafficSummary(propertyId, days);
       res.json(report);
     } catch (err: any) {
@@ -1020,6 +1067,17 @@ export function createApp() {
   });
 
   /* ------------------- GSC STRIKING DISTANCE & SITEMAPS ------------------- */
+
+  app.get("/api/gsc/sitemaps", async (req, res) => {
+    try {
+      const siteUrl = req.query.siteUrl as string;
+      if (!siteUrl) return res.status(400).json({ error: "siteUrl required" });
+      const sitemaps = await gsc.listSitemaps(siteUrl);
+      res.json(sitemaps);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.get("/api/gsc/striking-distance", async (req, res) => {
     try {

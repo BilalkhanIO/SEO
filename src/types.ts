@@ -81,24 +81,28 @@ export interface Alert {
   blog_name?: string;
 }
 
+// Note: GET /api/outreach and /api/outreach/due return partial column
+// projections (see src/outreach/outreach.ts listProspects/dueToday) that
+// vary by endpoint — fields below beyond id/site_url/status/opportunity
+// may be absent from a given response, not just null.
 export interface Prospect {
   id: number;
-  blog_id: number;
+  blog_id?: number;
   site_name: string | null;
   site_url: string;
-  niche: string | null;
+  niche?: string | null;
   authority: number | null;
-  contact_name: string | null;
+  contact_name?: string | null;
   contact_email: string | null;
-  email_verified: number;
+  email_verified?: number;
   opportunity: string;
   status: string;
-  last_contact_at: string | null;
+  last_contact_at?: string | null;
   next_action_at: string | null;
   published_url: string | null;
   link_rel: string | null;
-  notes: string | null;
-  created_at: string;
+  notes?: string | null;
+  created_at?: string;
 }
 
 export interface PageSpeedData {

@@ -67,7 +67,7 @@ export async function dueToday(blogId?: number) {
   return all(
     `SELECT id, site_name, site_url, contact_email, opportunity, status, last_contact_at, next_action_at
      FROM prospects
-     WHERE status NOT IN ('rejected','no_response','link_removed','link_live')
+     WHERE status NOT IN ('rejected','no_response','link_removed')
        AND next_action_at IS NOT NULL AND next_action_at <= date('now') ${where}
      ORDER BY next_action_at ASC`,
     args

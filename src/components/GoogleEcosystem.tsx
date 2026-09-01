@@ -103,7 +103,6 @@ export const GoogleEcosystem: React.FC<{
   const [gaTopPages, setGaTopPages] = useState<any[]>([]);
 
   // GSC State
-  const [sitemaps, setSitemaps] = useState<any[]>([]);
   const [strikingKws, setStrikingKws] = useState<StrikingOpportunity[]>([]);
   const [sitemapSubmitting, setSitemapSubmitting] = useState(false);
   const [sitemapSuccess, setSitemapSuccess] = useState<string | null>(null);
@@ -204,13 +203,8 @@ export const GoogleEcosystem: React.FC<{
     if (!currentBlog?.url) return;
     try {
       const cleanUrl = currentBlog.url.endsWith("/") ? currentBlog.url : `${currentBlog.url}/`;
-      const [smRes, strRes] = await Promise.all([
-        fetch(`/api/gsc/sitemaps?siteUrl=${encodeURIComponent(cleanUrl)}`).catch(() => ({ json: () => [] })),
-        fetch(`/api/gsc/striking-distance?siteUrl=${encodeURIComponent(cleanUrl)}`),
-      ]);
-      const smData = await smRes.json();
+      const strRes = await fetch(`/api/gsc/striking-distance?siteUrl=${encodeURIComponent(cleanUrl)}`);
       const strData = await strRes.json();
-      setSitemaps(Array.isArray(smData) ? smData : []);
       setStrikingKws(Array.isArray(strData) ? strData : []);
     } catch (err) {
       console.warn("GSC data error:", err);

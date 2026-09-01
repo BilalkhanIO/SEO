@@ -44,7 +44,7 @@ export async function runRecipes(blogId: number): Promise<RecipeHit[]> {
 
   // Recipe 1 — Striking distance: position 4–15, meaningful impressions
   for (const r of rows) {
-    if (r.position >= 4 && r.position <= 15 && r.impressions >= 100) {
+    if (r.position >= 4 && r.position <= 15 && r.impressions > 100) {
       hits.push({
         type: "striking_distance", page: r.page, query: r.query,
         message: `"${r.query}" at position ${r.position.toFixed(1)} with ${Math.round(r.impressions)} impressions — one push from top-3. Add the query to title/H2, expand that section, add 2 internal links in.`,
@@ -86,7 +86,7 @@ export async function runRecipes(blogId: number): Promise<RecipeHit[]> {
 
   // Recipe 5 — Decay: compare against a snapshot ~90 days older, per page
   const prevRows = await all<{ date: string }>(
-    "SELECT DISTINCT date FROM gsc_snapshots WHERE blog_id = ? AND date <= date(?, '-60 days') ORDER BY date DESC LIMIT 1",
+    "SELECT DISTINCT date FROM gsc_snapshots WHERE blog_id = ? AND date <= date(?, '-90 days') ORDER BY date DESC LIMIT 1",
     [blogId, period.date]
   );
   if (prevRows[0]) {
@@ -95,7 +95,7 @@ export async function runRecipes(blogId: number): Promise<RecipeHit[]> {
     const clicksPrev = sumByPage(prev);
     for (const [page, prevClicks] of clicksPrev) {
       const now = clicksNow.get(page) || 0;
-      if (prevClicks >= 20 && now < prevClicks * 0.75) {
+      if (prevClicks >= 20 && now <= prevClicks * 0.75) {
         hits.push({
           type: "decay", page,
           message: `Clicks dropped ${Math.round((1 - now / prevClicks) * 100)}% (${Math.round(prevClicks)} → ${Math.round(now)}) vs the ${prevRows[0].date} period. Refresh before decline compounds.`,

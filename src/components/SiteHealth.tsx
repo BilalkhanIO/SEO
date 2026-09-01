@@ -87,7 +87,7 @@ export const SiteHealth: React.FC<SiteHealthProps> = ({ currentBlog }) => {
 
       const data = await res.json();
       if (res.ok) {
-        setInspectResult(data.inspection);
+        setInspectResult(data);
       } else {
         alert(data.error || "URL Inspection failed");
       }

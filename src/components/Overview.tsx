@@ -356,7 +356,7 @@ export const Overview: React.FC<OverviewProps> = ({ currentBlog, onNavigate, sys
             </h3>
             <ol className="text-[11px] sm:text-xs text-stone-300 space-y-2 list-decimal list-inside leading-relaxed">
               <li><strong className="text-stone-100">Harvest:</strong> Expand seeds via Google Autocomplete & GSC gaps.</li>
-              <li><strong className="text-stone-100">Score:</strong> Apply the 5-Gate funnel (write only if score ≥ 8/10).</li>
+              <li><strong className="text-stone-100">Score:</strong> Apply the 5-Gate funnel (write only if score ≥ 6/10).</li>
               <li><strong className="text-stone-100">SERP Brief:</strong> Fetch competitor headings & PAA questions.</li>
               <li><strong className="text-stone-100">Validate:</strong> Run on-page gate (Title, Permalink, Alt text, Links).</li>
               <li><strong className="text-stone-100">Track & Refresh:</strong> Check 28-day GSC snapshots for decay and CTR fixers.</li>

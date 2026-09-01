@@ -442,7 +442,9 @@ export const App: React.FC = () => {
           <KeywordResearch
             currentBlog={currentBlog}
             onOpenSerp={handleOpenSerp}
-            onCreateBrief={() => {
+            onCreateBrief={(keywordId, keyword) => {
+              setSerpKeyword(keyword);
+              setSerpKeywordId(keywordId);
               setActiveTab("serp");
             }}
           />

@@ -269,10 +269,10 @@ export async function run360AutoPilot(
       pushLog("PUBLISH", "Step 4: Researching high-demand long-tail keyword for fresh publishing...", "info");
       
       let topAnalyticsTopics: string[] = [];
-      if (blog.ga4_property_id) {
+      if (blog.ga4_property) {
         pushLog("PUBLISH", `Analyzing Google Analytics top pages to guide topic generation...`, "info");
         try {
-          const topPages = await analytics.getGa4TopPages(blog.ga4_property_id, 10);
+          const topPages = await analytics.getGa4TopPages(blog.ga4_property, 10);
           topAnalyticsTopics = topPages.map(p => p.pageTitle).filter(Boolean).slice(0, 5);
           if (topAnalyticsTopics.length > 0) {
             pushLog("PUBLISH", `Found ${topAnalyticsTopics.length} top topics from GA4 for topic context.`, "info");

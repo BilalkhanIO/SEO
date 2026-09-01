@@ -158,12 +158,12 @@ export async function getAdSenseReport(
 
     const res = await api.accounts.reports.generate({
       account: accountName,
-      "dateRange.startDate.year": start.year,
-      "dateRange.startDate.month": start.month,
-      "dateRange.startDate.day": start.day,
-      "dateRange.endDate.year": end.year,
-      "dateRange.endDate.month": end.month,
-      "dateRange.endDate.day": end.day,
+      "startDate.year": start.year,
+      "startDate.month": start.month,
+      "startDate.day": start.day,
+      "endDate.year": end.year,
+      "endDate.month": end.month,
+      "endDate.day": end.day,
       dimensions: ["DATE"],
       metrics: [
         "PAGE_VIEWS",
@@ -182,7 +182,9 @@ export async function getAdSenseReport(
         pageViews: Number(cells[1]?.value || 0),
         impressions: Number(cells[2]?.value || 0),
         clicks: Number(cells[3]?.value || 0),
-        pageCtr: Number(cells[4]?.value || 0),
+        // PAGE_VIEWS_CTR is a METRIC_RATIO: AdSense returns it as a 0-1 fraction
+        // (e.g. "0.008" for 0.8%), so scale to percentage to match `summary.pageCtr` below.
+        pageCtr: Number(cells[4]?.value || 0) * 100,
         pageRpm: Number(cells[5]?.value || 0),
         estimatedEarnings: Number(cells[6]?.value || 0),
       };

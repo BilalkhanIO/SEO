@@ -59,7 +59,7 @@ export const RankTracker: React.FC<RankTrackerProps> = ({ currentBlog }) => {
 
       const data = await res.json();
       if (res.ok) {
-        setSyncMessage(`Synced ${data.synced} query & page rows from Google Search Console!`);
+        setSyncMessage(`Synced ${data.count} query & page rows from Google Search Console!`);
         fetchAlerts();
       } else {
         alert(data.error || "GSC Sync failed. Ensure OAuth is configured.");

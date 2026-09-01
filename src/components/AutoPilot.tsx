@@ -182,6 +182,7 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
     }
     if (!keyword) return;
 
+    const submittedKeyword = keyword;
     setIsGenerating(true);
     setGenResult(null);
 
@@ -198,7 +199,7 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
       });
       const data = await res.json();
       if (res.ok) {
-        setGenResult(data);
+        setGenResult({ ...data, keyword: submittedKeyword });
         setKeyword("");
         await fetchBlogPostsAudit();
       } else {
@@ -567,7 +568,7 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
             <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold mb-1">
               <CheckCircle2 className="w-4 h-4" /> Published Successfully to Blogger!
             </div>
-            <p className="text-xs text-stone-300 font-medium">{genResult.title}</p>
+            <p className="text-xs text-stone-300 font-medium">{genResult.title || genResult.keyword}</p>
             {genResult.postUrl && (
               <a
                 href={genResult.postUrl}
