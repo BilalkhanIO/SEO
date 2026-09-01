@@ -4,12 +4,12 @@ import { loadConfig } from "../config.js";
 let aiClient: GoogleGenAI | null = null;
 
 function getAiClient(): GoogleGenAI {
+  const cfg = loadConfig();
+  const apiKey = cfg.geminiApiKey;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
   if (!aiClient) {
-    const cfg = loadConfig();
-    const apiKey = cfg.geminiApiKey;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY is not configured.");
-    }
     aiClient = new GoogleGenAI({
       apiKey,
       httpOptions: {
@@ -23,6 +23,56 @@ function getAiClient(): GoogleGenAI {
 }
 
 /**
+ * Robust wrapper with exponential backoff and model fallbacks for 503 / 429 errors
+ */
+async function safeGenerateContent(params: {
+  preferredModel?: string;
+  contents: string;
+  config?: any;
+}) {
+  const ai = getAiClient();
+  const modelsToTry = [
+    params.preferredModel || "gemini-2.5-flash",
+    "gemini-2.5-flash",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash-lite",
+  ];
+
+  // Remove duplicates while preserving order
+  const uniqueModels = Array.from(new Set(modelsToTry));
+
+  let lastError: any = null;
+  for (const model of uniqueModels) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
+        return response;
+      } catch (err: any) {
+        lastError = err;
+        const msg = String(err?.message || err?.status || "");
+        // If model not found (404) or quota is 0, skip this model immediately without retrying
+        if (msg.includes("404") || msg.includes("NOT_FOUND") || msg.includes("limit: 0") || msg.includes("RESOURCE_EXHAUSTED")) {
+          break;
+        }
+        const isTransient = msg.includes("503") || msg.includes("429") || msg.includes("UNAVAILABLE") || msg.includes("high demand");
+        if (isTransient) {
+          // Wait briefly before retry
+          await new Promise((res) => setTimeout(res, (attempt + 1) * 1000));
+          continue;
+        }
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error("Failed to generate content from AI model.");
+}
+
+/**
  * Generate an AI-powered SEO Content Brief
  */
 export async function generateSeoBriefWithGemini(
@@ -30,7 +80,6 @@ export async function generateSeoBriefWithGemini(
   niche?: string,
   competitorHeadings?: string[]
 ): Promise<string> {
-  const ai = getAiClient();
   const prompt = `You are a world-class SEO content strategist and technical Blogger specialist.
 Create a comprehensive, production-ready SEO Content Brief for the target keyword: "${keyword}".
 ${niche ? `Niche / Industry: ${niche}` : ""}
@@ -52,8 +101,8 @@ Generate a clear, highly actionable Markdown brief containing:
 
 Format purely in clean, readable Markdown.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.7-flash",
+  const response = await safeGenerateContent({
+    preferredModel: "gemini-3.7-flash",
     contents: prompt,
   });
 
@@ -69,27 +118,31 @@ export async function generateSeoMetadataWithGemini(
   niche?: string
 ): Promise<{
   titles: string[];
-  descriptions: string[];
-  permalinks: string[];
+  metaDescriptions: string[];
+  permallinkSlug: string;
+  primaryCategory: string;
 }> {
-  const ai = getAiClient();
-  const prompt = `You are an SEO on-page optimization expert for Google Blogger.
-For the keyword: "${keyword}" ${niche ? `in the "${niche}" niche` : ""} ${
-    currentTitle ? `(current title: "${currentTitle}")` : ""
-  }, generate:
-1. Exactly 5 compelling, click-worthy SEO Titles (Strictly 45-58 characters each, keyword placed near beginning, high CTR triggers like numbers, years, benefits, or actionable verbs).
-2. Exactly 4 Search Descriptions / Meta Descriptions (Strictly 135-155 characters each, contains primary keyword, value proposition, and actionable CTR hook).
-3. Exactly 3 clean Blogger Custom Permalink slugs (lowercase, hyphenated, no stop words, e.g. "seo-keyword-guide").
+  const prompt = `You are an expert SEO copywriter specialized in Google Blogger click-through-rate (CTR) optimization.
+Given the target keyword: "${keyword}"
+${currentTitle ? `Current Title: "${currentTitle}"` : ""}
+${niche ? `Niche: "${niche}"` : ""}
 
-Respond ONLY in valid JSON with this exact structure:
+Generate high-ranking metadata:
+1. 5 Click-worthy SEO Titles (under 60 chars, power words, curiosity, or numbers).
+2. 3 Search Descriptions (between 130 and 155 characters, with active verbs and primary keyword).
+3. An ideal custom Blogger permalink slug (e.g., 'best-seo-tips-blogger').
+4. A primary category/label for Blogger.
+
+Respond ONLY in valid JSON format:
 {
   "titles": ["Title 1", "Title 2", "Title 3", "Title 4", "Title 5"],
-  "descriptions": ["Desc 1", "Desc 2", "Desc 3", "Desc 4"],
-  "permalinks": ["slug-1", "slug-2", "slug-3"]
+  "metaDescriptions": ["Desc 1", "Desc 2", "Desc 3"],
+  "permallinkSlug": "keyword-slug",
+  "primaryCategory": "Category"
 }`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.7-flash",
+  const response = await safeGenerateContent({
+    preferredModel: "gemini-3.7-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -97,31 +150,24 @@ Respond ONLY in valid JSON with this exact structure:
   });
 
   try {
-    const parsed = JSON.parse(response.text || "{}");
-    return {
-      titles: parsed.titles || [],
-      descriptions: parsed.descriptions || [],
-      permalinks: parsed.permalinks || [],
-    };
+    return JSON.parse(response.text || "{}");
   } catch (err) {
     return {
-      titles: [`${keyword}: Complete Guide [2026]`, `How to Master ${keyword} Fast`],
-      descriptions: [
-        `Learn everything you need to know about ${keyword}. Proven tips, step-by-step guidance, and expert best practices for 2026. Read now!`,
-      ],
-      permalinks: [keyword.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")],
+      titles: [`Complete Guide to ${keyword}`, `10 Best Ways to Master ${keyword}`],
+      metaDescriptions: [`Learn everything you need to know about ${keyword}. Proven tips, practical steps, and actionable advice.`],
+      permallinkSlug: keyword.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      primaryCategory: niche || "General",
     };
   }
 }
 
 /**
- * Auto-generate a full SEO blog post in HTML format for Blogger
+ * Generate complete full-length blog post HTML ready for Blogger publishing
  */
-export async function generateAutoBlogPost(
+export async function generateFullBlogPost(
   keyword: string,
   niche?: string
 ): Promise<{ title: string; htmlContent: string; tags: string[] }> {
-  const ai = getAiClient();
   const prompt = `You are a world-class AI Content Writer, SEO Specialist, and AdSense Monetization Expert.
 Write a comprehensive, engaging, highly authoritative, and fully optimized blog post targeting the keyword: "${keyword}".
 ${niche ? `Niche: ${niche}` : ""}
@@ -143,8 +189,8 @@ Respond ONLY in valid JSON format:
   "tags": ["Tag1", "Tag2", "Tag3"]
 }`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+  const response = await safeGenerateContent({
+    preferredModel: "gemini-3.7-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -170,7 +216,6 @@ export async function fixAndEnrichBlogPost(
   improvedHtml: string;
   changelog: string[];
 }> {
-  const ai = getAiClient();
   const prompt = `You are an SEO Content Optimizer and AdSense Approval Specialist.
 Optimize, rewrite, and significantly expand the following existing Blogger post to fix all content quality and ranking issues.
 
@@ -201,8 +246,8 @@ Respond ONLY in valid JSON:
   ]
 }`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+  const response = await safeGenerateContent({
+    preferredModel: "gemini-3.7-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -231,7 +276,6 @@ export async function generatePolicyPage(
   blogUrl: string,
   contactEmail?: string
 ): Promise<{ title: string; htmlContent: string }> {
-  const ai = getAiClient();
   const prompt = `You are a compliance attorney and Google AdSense policy specialist.
 Generate a comprehensive, legally compliant, and AdSense-ready "${pageType}" page HTML specifically tailored for the website:
 - Blog Name: "${blogName}"
@@ -251,8 +295,8 @@ Output ONLY valid JSON with clean HTML:
   "htmlContent": "<div class=\"legal-page\"><h2>...</h2><p>...</p></div>"
 }`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.7-flash",
+  const response = await safeGenerateContent({
+    preferredModel: "gemini-3.7-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -288,7 +332,6 @@ export async function expandKeywordsWithGemini(
     reason: string;
   }>
 > {
-  const ai = getAiClient();
   const prompt = `You are a search engine keyword intelligence strategist.
 Given the seed topic: "${seed}" ${niche ? `for a website in the "${niche}" niche` : ""}, generate 12 high-potential, long-tail keyword opportunities that are winnable for a Google Blogger site.
 
@@ -309,8 +352,8 @@ Respond ONLY in valid JSON format:
   }
 ]`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.7-flash",
+  const response = await safeGenerateContent({
+    preferredModel: "gemini-3.7-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -323,3 +366,5 @@ Respond ONLY in valid JSON format:
     return [];
   }
 }
+
+export const generateAutoBlogPost = generateFullBlogPost;
