@@ -233,7 +233,7 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
               360° Google & Blog Auto-Pilot
             </h1>
             <p className="text-xs sm:text-sm text-stone-400 leading-relaxed">
-              Once initiated, the autonomous engine scans your entire Blogger site, resolves AdSense policy gaps by auto-publishing mandatory legal pages, expands thin articles to 1,500+ words with Gemini, submits sitemaps to Search Console, and publishes fresh high-intent content.
+              Once initiated, the autonomous engine scans your entire Blogger site, resolves AdSense policy gaps by auto-publishing mandatory legal pages, expands thin articles toward 1,500+ words with Gemini (verified 800+ minimum before publishing — thin drafts are retried, never shipped), submits sitemaps to Search Console, and publishes fresh high-intent content.
             </p>
           </div>
 
@@ -396,7 +396,7 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
           <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
             <span className="text-[11px] text-stone-400 font-medium">Posts Auto-Enriched</span>
             <p className="text-xl sm:text-2xl font-extrabold text-stone-100 font-mono mt-1">+{metrics360.postsEnriched}</p>
-            <span className="text-[10px] text-sky-400 mt-0.5 block font-mono">1500+ Words & Schema</span>
+            <span className="text-[10px] text-sky-400 mt-0.5 block font-mono">800+ Words & Schema</span>
           </div>
 
           <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
@@ -514,10 +514,10 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
       <div className="bg-stone-900/90 border border-stone-800 rounded-3xl p-5 sm:p-6 shadow-sm">
         <h3 className="text-base font-bold text-stone-100 flex items-center gap-2 mb-1.5">
           <Sparkles className="w-5 h-5 text-amber-400" />
-          Targeted AI Article Publisher (1,500+ Words + Schema.org)
+          Targeted AI Article Publisher (800+ Words + Schema.org)
         </h3>
         <p className="text-xs text-stone-400 mb-4">
-          Provide a keyword to generate a complete, structured article with comparison tables, FAQ schema, and instant Blogger publishing.
+          Provide a keyword to generate a complete, structured article (targeting 1,500+ words, retried automatically if it comes back thin) with comparison tables, FAQ schema, and instant Blogger publishing.
         </p>
 
         <form onSubmit={handleSinglePostGenerate} className="space-y-4">
@@ -569,6 +569,9 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
               <CheckCircle2 className="w-4 h-4" /> Published Successfully to Blogger!
             </div>
             <p className="text-xs text-stone-300 font-medium">{genResult.title || genResult.keyword}</p>
+            {typeof genResult.wordCount === "number" && (
+              <p className="text-[11px] text-stone-500 mt-0.5 font-mono">{genResult.wordCount} words</p>
+            )}
             {genResult.postUrl && (
               <a
                 href={genResult.postUrl}

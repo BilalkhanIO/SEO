@@ -13,7 +13,7 @@ import {
 import { fetchSerp } from "../serp/serp.js";
 
 /** Below this, Blogger/AdSense treat a post as thin content (matches the audit's own "800+ words" guidance). */
-const MIN_WORD_COUNT = 800;
+export const MIN_WORD_COUNT = 800;
 const MAX_GENERATION_ATTEMPTS = 3;
 
 /**
@@ -22,7 +22,7 @@ const MAX_GENERATION_ATTEMPTS = 3;
  * MAX_GENERATION_ATTEMPTS times and keep the longest result, so a thin draft never
  * gets published just because the first attempt came back short.
  */
-async function generateWithMinWordCount<T>(
+export async function generateWithMinWordCount<T>(
   generate: () => Promise<T>,
   getHtml: (result: T) => string,
   pushLog: (message: string, type?: AutoPilotLog["type"]) => void,
@@ -77,6 +77,8 @@ export async function run360AutoPilot(
     autoSubmitSitemaps?: boolean;
     autoIndexUrls?: boolean;
     publishNewArticle?: boolean;
+    /** Override the blog's stored niche for this run only (doesn't persist to the DB row). */
+    nicheOverride?: string;
   } = {}
 ): Promise<AutoPilot360Result> {
   const logs: AutoPilotLog[] = [];
@@ -121,7 +123,7 @@ export async function run360AutoPilot(
 
   const blogName = blog.name;
   const blogUrl = blog.url;
-  const niche = blog.niche || "Technology & Digital Solutions";
+  const niche = options.nicheOverride || blog.niche || "Technology & Digital Solutions";
   pushLog("INIT", `Connected to: "${blogName}" (${blogUrl}) - Niche: ${niche}`, "success");
 
   try {

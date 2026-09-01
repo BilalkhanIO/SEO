@@ -16,7 +16,7 @@ import * as outreach from "./src/outreach/outreach.js";
 import { loadConfig } from "./src/config.js";
 import * as adsense from "./src/google/adsense.js";
 import * as analytics from "./src/google/analytics.js";
-import { runAutomationCycle, run360AutoPilot } from "./src/automation/routine.js";
+import { runAutomationCycle, run360AutoPilot, generateWithMinWordCount, MIN_WORD_COUNT } from "./src/automation/routine.js";
 import {
   generateSeoBriefWithGemini,
   generateSeoMetadataWithGemini,
@@ -117,7 +117,7 @@ export function createApp() {
     try {
       const { blogId, niche } = req.body;
       if (!blogId || !niche) return res.status(400).json({ error: "blogId and niche required" });
-      const result = await runAutomationCycle(blogId, niche);
+      const result = await runAutomationCycle(blogId, { nicheOverride: niche });
       res.json(result);
     } catch (err: any) {
       console.error(err);
@@ -886,20 +886,41 @@ export function createApp() {
       if (!blog || !blog.blogger_blog_id) return res.status(400).json({ error: "Blog not found or lacks a linked Blogger ID" });
 
       const willBeDraft = isDraft !== false;
-      const content = await generateAutoBlogPost(keyword, niche);
+      const { result: content, wordCount } = await generateWithMinWordCount(
+        () => generateAutoBlogPost(keyword, niche),
+        (r) => r.htmlContent,
+        () => {}, // no live log stream for this single-post endpoint; the retry still happens silently
+        `New article ("${keyword}")`
+      );
+
+      if (wordCount < MIN_WORD_COUNT) {
+        return res.status(422).json({
+          error: `Best attempt still only ${wordCount} words (need ${MIN_WORD_COUNT}+). Not publishing thin content — try again.`,
+        });
+      }
+
       const post = await blogger.insertPost({
         blogId: blog.blogger_blog_id,
         title: content.title,
         contentHtml: content.htmlContent,
         labels: content.tags,
+        customMetaData: content.searchDescription,
         isDraft: willBeDraft,
       });
+
+      if (!willBeDraft) {
+        await run(
+          `INSERT INTO posts (blog_id, title, url, blogger_post_id, stage, brief_md) VALUES (?, ?, ?, ?, ?, ?)`,
+          [blogId, content.title, post.url || "", post.id || "", "published", `Manually generated for keyword: ${keyword}`]
+        );
+      }
 
       res.json({
         success: true,
         postUrl: post.url,
         postId: post.id,
         isDraft: willBeDraft,
+        wordCount,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to generate auto blog" });
@@ -1221,10 +1242,23 @@ export function createApp() {
       const postData = await blogger.getPost(bloggerBlogId, bloggerPostId);
       if (!postData.content) return res.status(400).json({ error: "Post has no content to fix" });
 
-      const fixed = await fixAndEnrichBlogPost(postData.content, title || postData.title || "Blog Post", keyword);
+      const { result: fixed, wordCount } = await generateWithMinWordCount(
+        () => fixAndEnrichBlogPost(postData.content!, title || postData.title || "Blog Post", keyword),
+        (r) => r.improvedHtml,
+        () => {}, // no live log stream for this single-post endpoint; the retry still happens silently
+        `Enriching "${title || postData.title || bloggerPostId}"`
+      );
+
+      if (wordCount < MIN_WORD_COUNT) {
+        return res.status(422).json({
+          error: `Best attempt still only ${wordCount} words (need ${MIN_WORD_COUNT}+). Not publishing thin content — try again.`,
+        });
+      }
+
       const updated = await blogger.updatePost(bloggerBlogId, bloggerPostId, {
         title: fixed.improvedTitle,
         content: fixed.improvedHtml,
+        customMetaData: fixed.searchDescription,
       });
 
       // Notify Indexing API if live
@@ -1234,7 +1268,7 @@ export function createApp() {
         } catch {}
       }
 
-      res.json({ success: true, updated, changelog: fixed.changelog });
+      res.json({ success: true, updated, changelog: fixed.changelog, wordCount });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
