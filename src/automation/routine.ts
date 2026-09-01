@@ -155,7 +155,9 @@ export async function run360AutoPilot(
           try {
             const postDetail = await blogger.getPost(blog.blogger_blog_id, p.bloggerPostId);
             if (postDetail.content) {
-              const enriched = await fixAndEnrichBlogPost(postDetail.content, p.title, undefined, internalLinksContext);
+              // Exclude the post being enriched so it can't be told to link to itself
+              const linksForThisPost = internalLinksContext.filter((link) => link.url !== p.url);
+              const enriched = await fixAndEnrichBlogPost(postDetail.content, p.title, undefined, linksForThisPost);
               await blogger.updatePost(blog.blogger_blog_id, p.bloggerPostId, {
                 title: enriched.improvedTitle || p.title,
                 content: enriched.improvedHtml,
@@ -165,7 +167,7 @@ export async function run360AutoPilot(
               metrics.postsEnriched++;
               pushLog(
                 "CONTENT",
-                `Successfully updated & enriched "${p.title}" on Blogger! Changelog: ${enriched.changelog.join(", ")}`,
+                `Successfully updated & enriched "${p.title}" on Blogger (search description embedded in JSON-LD structured data). Changelog: ${enriched.changelog.join(", ")}`,
                 "success"
               );
 

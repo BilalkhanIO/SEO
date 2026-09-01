@@ -189,7 +189,7 @@ Content Requirements:
 4. Include an interactive Comparison Table or Feature Breakdown table.
 5. Include a "Key Takeaways" summary box right after the introduction.
 6. Include a rich "Frequently Asked Questions" (FAQ) section with 4-5 high-intent questions and structured answers.
-7. Embed a valid Schema.org FAQPage and BlogPosting JSON-LD script at the bottom of the HTML content.
+7. Embed a valid Schema.org FAQPage and BlogPosting JSON-LD script at the bottom of the HTML content. The BlogPosting object's "description" property MUST be set to the exact same text as the "searchDescription" you return below (Blogger's API has no reliable way to set the post's search-snippet meta description directly, so this structured-data description is the mechanism search engines actually read).
 8. Provide 3-5 relevant Blogger category tags/labels.
 9. Provide a highly optimized SEO search description (meta description) under 150 characters.
 10. EXTERNAL LINKING: Include 1-2 outbound links to high-authority, non-competing external sources (e.g., Wikipedia, official documentation, reputable industry journals) using descriptive anchor text.
@@ -251,7 +251,7 @@ Your Task:
 1. If the content is thin (< 1,000 words), expand it with in-depth practical advice, steps, examples, and deep domain knowledge (reach 1,500+ words).
 2. Add missing semantic <h2> and <h3> subheadings with keyword variations.
 3. Add a structured 3-5 item FAQ section with clear, concise answers for Google Featured Snippets.
-4. Add Schema.org JSON-LD structured data (FAQPage + BlogPosting) at the bottom.
+4. Add Schema.org JSON-LD structured data (FAQPage + BlogPosting) at the bottom. The BlogPosting object's "description" property MUST be set to the exact same text as the "searchDescription" you return below (Blogger's API has no reliable way to set the post's search-snippet meta description directly, so this structured-data description is the mechanism search engines actually read).
 5. Fix image tags by ensuring all <img> tags have descriptive 'alt="..."' attributes.
 6. Add an informative Comparison Table or Step-by-Step checklist.
 7. Return clean HTML ready for Google Blogger without markdown wrappers.
