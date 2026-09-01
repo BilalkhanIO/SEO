@@ -53,7 +53,7 @@ Generate a clear, highly actionable Markdown brief containing:
 Format purely in clean, readable Markdown.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+    model: "gemini-3.7-flash",
     contents: prompt,
   });
 
@@ -89,7 +89,7 @@ Respond ONLY in valid JSON with this exact structure:
 }`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+    model: "gemini-3.7-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -106,7 +106,9 @@ Respond ONLY in valid JSON with this exact structure:
   } catch (err) {
     return {
       titles: [`${keyword}: Complete Guide [2026]`, `How to Master ${keyword} Fast`],
-      descriptions: [`Learn everything you need to know about ${keyword}. Proven tips, step-by-step guidance, and expert best practices for 2026. Read now!`],
+      descriptions: [
+        `Learn everything you need to know about ${keyword}. Proven tips, step-by-step guidance, and expert best practices for 2026. Read now!`,
+      ],
       permalinks: [keyword.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")],
     };
   }
@@ -120,26 +122,29 @@ export async function generateAutoBlogPost(
   niche?: string
 ): Promise<{ title: string; htmlContent: string; tags: string[] }> {
   const ai = getAiClient();
-  const prompt = `You are a world-class AI Content Writer and SEO expert specializing in Google Blogger.
-Write a comprehensive, engaging, and fully optimized blog post targeting the keyword: "${keyword}".
+  const prompt = `You are a world-class AI Content Writer, SEO Specialist, and AdSense Monetization Expert.
+Write a comprehensive, engaging, highly authoritative, and fully optimized blog post targeting the keyword: "${keyword}".
 ${niche ? `Niche: ${niche}` : ""}
 
-Requirements:
-1. Provide an SEO-optimized H1 title (under 60 characters).
-2. Write the full body content using semantic HTML5 tags (<h2>, <h3>, <p>, <ul>, <li>, <strong>, <em>, <blockquote>).
-3. The content must be highly readable, authoritative, and structurally sound (intro, body sections, FAQ, conclusion).
-4. Do NOT output Markdown. ONLY output clean HTML for the body. Do not include <html>, <head>, or <body> wrappers.
-5. Provide 3-5 relevant category tags/labels for the Blogger post.
+Content Requirements:
+1. Provide a click-worthy SEO Title (H1 equivalent, under 60 characters).
+2. Write deep, valuable, high-E-E-A-T body content (Target 1,500+ words).
+3. Use clean semantic HTML5 markup: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <blockquote>, <table>.
+4. Include an interactive Comparison Table or Feature Breakdown table.
+5. Include a "Key Takeaways" summary box right after the introduction.
+6. Include a rich "Frequently Asked Questions" (FAQ) section with 4-5 high-intent questions and structured answers.
+7. Embed a valid Schema.org FAQPage and BlogPosting JSON-LD script at the bottom of the HTML content.
+8. Provide 3-5 relevant Blogger category tags/labels.
 
-Respond ONLY in valid JSON format with this exact structure:
+Respond ONLY in valid JSON format:
 {
-  "title": "Your SEO H1 Title Here",
-  "htmlContent": "<h2>Introduction</h2><p>...</p>",
-  "tags": ["tag1", "tag2", "tag3"]
+  "title": "Your SEO Title Here",
+  "htmlContent": "<div class=\"blog-post\">...<h2>...</h2>...<script type=\"application/ld+json\">...</script></div>",
+  "tags": ["Tag1", "Tag2", "Tag3"]
 }`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+    model: "gemini-3.1-pro-preview",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -150,6 +155,124 @@ Respond ONLY in valid JSON format with this exact structure:
     return JSON.parse(response.text || "{}");
   } catch (err) {
     throw new Error("Failed to generate blog post content.");
+  }
+}
+
+/**
+ * Automatically audit, expand, and enrich an existing blog post
+ */
+export async function fixAndEnrichBlogPost(
+  currentHtml: string,
+  title: string,
+  keyword?: string
+): Promise<{
+  improvedTitle: string;
+  improvedHtml: string;
+  changelog: string[];
+}> {
+  const ai = getAiClient();
+  const prompt = `You are an SEO Content Optimizer and AdSense Approval Specialist.
+Optimize, rewrite, and significantly expand the following existing Blogger post to fix all content quality and ranking issues.
+
+Current Post Title: "${title}"
+${keyword ? `Target Primary Keyword: "${keyword}"` : ""}
+Current Post HTML:
+${currentHtml.slice(0, 5000)}
+
+Your Task:
+1. If the content is thin (< 1,000 words), expand it with in-depth practical advice, steps, examples, and deep domain knowledge (reach 1,500+ words).
+2. Add missing semantic <h2> and <h3> subheadings with keyword variations.
+3. Add a structured 3-5 item FAQ section with clear, concise answers for Google Featured Snippets.
+4. Add Schema.org JSON-LD structured data (FAQPage + BlogPosting) at the bottom.
+5. Fix image tags by ensuring all <img> tags have descriptive 'alt="..."' attributes.
+6. Add an informative Comparison Table or Step-by-Step checklist.
+7. Return clean HTML ready for Google Blogger without markdown wrappers.
+
+Respond ONLY in valid JSON:
+{
+  "improvedTitle": "Optimized Click-Worthy Title",
+  "improvedHtml": "<h2>Introduction</h2><p>...</p>",
+  "changelog": [
+    "Expanded word count from X to 1,600+ words",
+    "Added 4 semantic H2 and 6 H3 subheadings",
+    "Added structured FAQ section with Schema.org JSON-LD",
+    "Injected descriptive ALT attributes to all images",
+    "Inserted comparative analysis table"
+  ]
+}`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3.1-pro-preview",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+    },
+  });
+
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (err) {
+    // Fallback: append FAQ to original content
+    const appendFaq = `<div class="seo-updated-faq"><h2>Frequently Asked Questions</h2><h3>What are the key tips for ${title}?</h3><p>Ensure you follow the recommended steps, maintain consistent updates, and adhere to proven best practices.</p></div>`;
+    return {
+      improvedTitle: title,
+      improvedHtml: currentHtml + "\n<br/>\n" + appendFaq,
+      changelog: ["Appended FAQ section to boost semantic ranking density"],
+    };
+  }
+}
+
+/**
+ * Generate fully compliant legal & navigation policy pages for Google Blogger & AdSense
+ */
+export async function generatePolicyPage(
+  pageType: "privacy" | "terms" | "about" | "contact" | "disclaimer",
+  blogName: string,
+  blogUrl: string,
+  contactEmail?: string
+): Promise<{ title: string; htmlContent: string }> {
+  const ai = getAiClient();
+  const prompt = `You are a compliance attorney and Google AdSense policy specialist.
+Generate a comprehensive, legally compliant, and AdSense-ready "${pageType}" page HTML specifically tailored for the website:
+- Blog Name: "${blogName}"
+- Blog URL: "${blogUrl}"
+- Contact Email: "${contactEmail || "contact@" + blogUrl.replace(/https?:\/\//, "").replace(/\/$/, "")}"
+
+Requirements by Page Type:
+- "privacy": Full GDPR, CCPA, Google AdSense, DoubleClick DART cookie, Google Analytics, and 3rd-party advertiser disclosures.
+- "terms": Standard terms of service, intellectual property notice, disclaimer of warranties, limitation of liability.
+- "about": High E-E-A-T author authenticity, mission statement, editorial standards, expertise, and credibility.
+- "contact": Contact form placeholder, direct contact details, response time commitment, editorial inquiries.
+- "disclaimer": Advertising disclosure, affiliate link disclosure (FTC compliance), professional advice limitation.
+
+Output ONLY valid JSON with clean HTML:
+{
+  "title": "Page Title (e.g. Privacy Policy)",
+  "htmlContent": "<div class=\"legal-page\"><h2>...</h2><p>...</p></div>"
+}`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3.7-flash",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+    },
+  });
+
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (err) {
+    const titles: Record<string, string> = {
+      privacy: "Privacy Policy",
+      terms: "Terms of Service",
+      about: "About Us",
+      contact: "Contact Us",
+      disclaimer: "Disclaimer",
+    };
+    return {
+      title: titles[pageType] || "Policy Page",
+      htmlContent: `<div class="policy-page"><h2>${titles[pageType]}</h2><p>Welcome to ${blogName}. Your privacy and trust are of paramount importance to us. For any inquiries, please contact us at ${contactEmail || "our official support channel"}.</p></div>`,
+    };
   }
 }
 
@@ -187,7 +310,7 @@ Respond ONLY in valid JSON format:
 ]`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+    model: "gemini-3.7-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",

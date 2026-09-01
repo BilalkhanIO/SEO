@@ -12,6 +12,7 @@ import { OutreachCrm } from "./components/OutreachCrm.js";
 import { BlogManager } from "./components/BlogManager.js";
 import { TechnicalTools } from "./components/TechnicalTools.js";
 import { AutoPilot } from "./components/AutoPilot.js";
+import { GoogleEcosystem } from "./components/GoogleEcosystem.js";
 import {
   Sparkles,
   LayoutDashboard,
@@ -29,10 +30,17 @@ import {
   AlertCircle,
   Wrench,
   Rocket,
+  DollarSign,
+  Menu,
+  X,
+  Zap,
+  CheckCircle2,
+  ExternalLink,
 } from "lucide-react";
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>("overview");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [blogs, setBlogs] = useState<Blog[]>([]);
   const [currentBlog, setCurrentBlog] = useState<Blog | null>(null);
   const [systemStatus, setSystemStatus] = useState<{
@@ -152,44 +160,83 @@ export const App: React.FC = () => {
     setActiveTab("validator");
   };
 
-  const navItems = [
-    { id: "overview", label: "Overview", icon: LayoutDashboard },
-    { id: "keywords", label: "Keywords", icon: Search },
-    { id: "serp", label: "SERP & Briefs", icon: FileText },
-    { id: "pipeline", label: "Pipeline", icon: Layers },
-    { id: "validator", label: "Validator", icon: FileCheck },
-    { id: "schema", label: "Schema", icon: Code },
-    { id: "tracking", label: "Rank Tracking", icon: TrendingUp },
-    { id: "health", label: "Site Health", icon: Activity },
-    { id: "outreach", label: "Outreach CRM", icon: Send },
-    { id: "tools", label: "Tech SEO Tools", icon: Wrench },
-    { id: "autoblog", label: "Auto-Pilot", icon: Rocket },
-    { id: "blogs", label: "Blogs", icon: Globe },
+  const navCategories = [
+    {
+      title: "Core Automation",
+      items: [
+        { id: "overview", label: "Overview", icon: LayoutDashboard, badge: null },
+        { id: "google", label: "Google Suite & AdSense", icon: DollarSign, badge: "Live" },
+        { id: "autoblog", label: "360° Auto-Pilot", icon: Rocket, badge: "AI" },
+      ],
+    },
+    {
+      title: "Content & SEO Loop",
+      items: [
+        { id: "keywords", label: "Keywords", icon: Search, badge: systemStatus.counts.keywords > 0 ? `${systemStatus.counts.keywords}` : null },
+        { id: "serp", label: "SERP & Briefs", icon: FileText, badge: null },
+        { id: "pipeline", label: "Pipeline", icon: Layers, badge: null },
+        { id: "validator", label: "Validator", icon: FileCheck, badge: null },
+        { id: "schema", label: "Schema", icon: Code, badge: null },
+      ],
+    },
+    {
+      title: "Performance & Growth",
+      items: [
+        { id: "tracking", label: "Rank Tracking", icon: TrendingUp, badge: systemStatus.counts.alerts > 0 ? `${systemStatus.counts.alerts}` : null },
+        { id: "health", label: "Site Health", icon: Activity, badge: null },
+        { id: "outreach", label: "Outreach CRM", icon: Send, badge: systemStatus.counts.prospects > 0 ? `${systemStatus.counts.prospects}` : null },
+        { id: "tools", label: "Tech SEO Tools", icon: Wrench, badge: null },
+        { id: "blogs", label: "Blogs", icon: Globe, badge: blogs.length > 0 ? `${blogs.length}` : null },
+      ],
+    },
   ];
+
+  const allNavItems = navCategories.flatMap((c) => c.items);
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans selection:bg-amber-500 selection:text-stone-950">
       {/* Top Header Bar */}
-      <header className="sticky top-0 z-40 bg-stone-900/90 backdrop-blur-md border-b border-stone-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-          {/* Logo & Title */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab("overview")}>
-            <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center text-stone-950 shadow-md">
-              <Sparkles className="w-5 h-5 fill-current" />
-            </div>
-            <div>
-              <div className="text-base font-extrabold tracking-tight flex items-center gap-2">
-                <span>Blogger SEO Command</span>
-                <span className="px-1.5 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  Pro
-                </span>
+      <header className="sticky top-0 z-40 bg-stone-900/95 backdrop-blur-md border-b border-stone-800/90 shadow-md">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3 sm:gap-4">
+          {/* Left: Mobile Toggle & Brand Logo */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-2 rounded-xl bg-stone-850 hover:bg-stone-800 text-stone-300 hover:text-white border border-stone-700/80 transition-colors focus:outline-none"
+              aria-label="Toggle navigation menu"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+
+            <div
+              className="flex items-center gap-2.5 cursor-pointer group"
+              onClick={() => {
+                setActiveTab("overview");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center text-stone-950 shadow-md group-hover:scale-105 transition-transform">
+                <Sparkles className="w-5 h-5 fill-current" />
               </div>
-              <p className="text-[11px] text-stone-400 font-mono -mt-0.5">Multi-Blog Organic Engine</p>
+              <div>
+                <div className="text-sm sm:text-base font-extrabold tracking-tight flex items-center gap-1.5">
+                  <span className="bg-gradient-to-r from-stone-100 to-stone-300 bg-clip-text text-transparent">
+                    Blogger SEO
+                  </span>
+                  <span className="px-1.5 py-0.2 text-[9px] sm:text-[10px] uppercase font-bold tracking-wider rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Pro
+                  </span>
+                </div>
+                <p className="hidden sm:block text-[10px] text-stone-400 font-mono -mt-0.5">
+                  Multi-Blog Organic Engine
+                </p>
+              </div>
             </div>
           </div>
 
-          {/* Active Blog Switcher & System Indicators */}
-          <div className="flex items-center gap-3">
+          {/* Right: Active Blog Switcher, API Pills & Quick Action */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Active Blog Dropdown */}
             {blogs.length > 0 && (
               <div className="relative">
                 <select
@@ -198,11 +245,11 @@ export const App: React.FC = () => {
                     const found = blogs.find((b) => b.id === parseInt(e.target.value));
                     if (found) setCurrentBlog(found);
                   }}
-                  className="appearance-none bg-stone-850 hover:bg-stone-800 border border-stone-700/80 text-stone-200 text-xs font-semibold pl-3 pr-8 py-2 rounded-xl focus:outline-none focus:border-amber-500 transition-colors cursor-pointer"
+                  className="appearance-none bg-stone-850 hover:bg-stone-800 border border-stone-700/90 text-stone-200 text-xs font-semibold pl-3 pr-8 py-2 rounded-xl focus:outline-none focus:border-amber-500 transition-colors cursor-pointer max-w-[140px] sm:max-w-[220px] truncate"
                 >
                   {blogs.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.name} ({b.url.replace(/^https?:\/\//, "").replace(/\/$/, "")})
+                      {b.name}
                     </option>
                   ))}
                 </select>
@@ -210,22 +257,18 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            {/* API Status Pills */}
-            <div className="hidden sm:flex items-center gap-2 text-[11px] font-mono">
+            {/* API Status Pills on Desktop */}
+            <div className="hidden md:flex items-center gap-1.5 text-[11px] font-mono">
               <span
-                title={systemStatus.hasGemini ? "Gemini 3.7 Flash AI Engine Active" : "Gemini AI Key Pending"}
-                className={`px-2 py-1 rounded-lg border flex items-center gap-1 ${
-                  systemStatus.hasGemini
-                    ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
-                    : "bg-stone-800 text-stone-400 border-stone-700"
-                }`}
+                title="Gemini 3.7 Flash AI Engine Active"
+                className="px-2 py-1 rounded-lg border bg-amber-500/10 text-amber-300 border-amber-500/20 flex items-center gap-1"
               >
                 <Sparkles className="w-3 h-3 text-amber-400" />
-                Gemini AI
+                Gemini
               </span>
 
               <span
-                title={systemStatus.authReady ? "Google OAuth Configured" : "Google OAuth Configured (Client ID Loaded)"}
+                title={systemStatus.authReady ? "Google OAuth Active" : "Google OAuth Configured"}
                 className={`px-2 py-1 rounded-lg border flex items-center gap-1 ${
                   systemStatus.authReady
                     ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
@@ -233,7 +276,7 @@ export const App: React.FC = () => {
                 }`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${systemStatus.authReady ? "bg-emerald-400" : "bg-stone-500"}`} />
-                Google API
+                Google
               </span>
 
               <span
@@ -248,56 +291,136 @@ export const App: React.FC = () => {
                 SERP
               </span>
             </div>
+
+            {/* Quick Action Button */}
+            <button
+              onClick={() => {
+                setActiveTab("autoblog");
+                setMobileMenuOpen(false);
+              }}
+              className="bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold px-3 sm:px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            >
+              <Zap className="w-3.5 h-3.5 fill-current" />
+              <span className="hidden sm:inline">Auto-Pilot</span>
+            </button>
           </div>
         </div>
 
-        {/* Navigation Tabs Bar */}
-        <div className="border-t border-stone-800/80 bg-stone-900/60 overflow-x-auto no-scrollbar">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1 py-1.5">
-            {navItems.map((item) => {
+        {/* Desktop Horizontal Navigation Bar */}
+        <div className="hidden lg:block border-t border-stone-800/80 bg-stone-900/70 overflow-x-auto no-scrollbar">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1.5 py-1.5">
+            {allNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-2 ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
                     isActive
-                      ? "bg-amber-500 text-stone-950 shadow-sm font-bold"
-                      : "text-stone-400 hover:text-stone-200 hover:bg-stone-800/60"
+                      ? "bg-amber-500 text-stone-950 shadow-sm font-bold scale-100"
+                      : "text-stone-400 hover:text-stone-200 hover:bg-stone-800/70"
                   }`}
                 >
-                  <Icon className={`w-4 h-4 ${isActive ? "text-stone-950" : "text-stone-400"}`} />
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? "text-stone-950" : "text-stone-400"}`} />
                   <span>{item.label}</span>
+                  {item.badge && !isActive && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-stone-800 text-stone-300 border border-stone-700">
+                      {item.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}
           </div>
         </div>
+
+        {/* Mobile Navigation Drawer / Menu */}
+        {mobileMenuOpen && (
+          <div className="lg:hidden border-t border-stone-800 bg-stone-900/98 max-h-[80vh] overflow-y-auto p-4 space-y-5 shadow-2xl backdrop-blur-xl animate-in slide-in-from-top-4 duration-200">
+            {navCategories.map((category, idx) => (
+              <div key={idx} className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 px-3">
+                  {category.title}
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {category.items.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          setMobileMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-semibold transition-all ${
+                          isActive
+                            ? "bg-amber-500 text-stone-950 font-bold shadow-md"
+                            : "text-stone-300 hover:text-white hover:bg-stone-800/80 bg-stone-950/40 border border-stone-850"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Icon className={`w-4 h-4 ${isActive ? "text-stone-950" : "text-amber-400"}`} />
+                          <span>{item.label}</span>
+                        </div>
+                        {item.badge && (
+                          <span
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
+                              isActive
+                                ? "bg-stone-950 text-amber-400 font-bold"
+                                : "bg-stone-800 text-stone-400 border border-stone-700"
+                            }`}
+                          >
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {/* Mobile Auth Button if not connected */}
+            {!systemStatus.authReady && (
+              <div className="pt-2 border-t border-stone-800">
+                <button
+                  onClick={handleConnectGoogle}
+                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-colors"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  Connect Google Account
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8">
         {!systemStatus.authReady && (
-          <div className="mb-6 bg-stone-900 border border-stone-700/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="mb-6 bg-stone-900 border border-stone-700/80 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                <ShieldCheck className="w-5 h-5 text-blue-400" />
+              <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center flex-shrink-0 text-blue-400">
+                <ShieldCheck className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-stone-200">Connect Your Google Account</h3>
-                <p className="text-xs text-stone-400 mt-0.5">Required for Blogger and Google Search Console integration.</p>
+                <h3 className="text-sm font-bold text-stone-200">Connect Your Google Workspace & Blogger Account</h3>
+                <p className="text-xs text-stone-400 mt-0.5">Enables automated publishing, live Search Console audits, and AdSense syncing.</p>
               </div>
             </div>
             <button 
               onClick={handleConnectGoogle}
-              className="whitespace-nowrap px-5 py-2 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold shadow-md transition-colors"
+              className="w-full sm:w-auto whitespace-nowrap px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer text-center"
             >
               Authenticate with Google
             </button>
           </div>
         )}
 
+        {/* Tab Components */}
         {activeTab === "overview" && (
           <Overview
             currentBlog={currentBlog}
@@ -306,12 +429,20 @@ export const App: React.FC = () => {
           />
         )}
 
+        {activeTab === "google" && (
+          <GoogleEcosystem
+            currentBlog={currentBlog}
+            onNavigateToTab={(tab) => setActiveTab(tab)}
+          />
+        )}
+
+        {activeTab === "autoblog" && <AutoPilot currentBlog={currentBlog} />}
+
         {activeTab === "keywords" && (
           <KeywordResearch
             currentBlog={currentBlog}
             onOpenSerp={handleOpenSerp}
-            onCreateBrief={(kwId) => {
-              const kw = systemStatus; // or pass callback
+            onCreateBrief={() => {
               setActiveTab("serp");
             }}
           />
@@ -351,7 +482,6 @@ export const App: React.FC = () => {
         {activeTab === "outreach" && <OutreachCrm currentBlog={currentBlog} />}
 
         {activeTab === "tools" && <TechnicalTools />}
-        {activeTab === "autoblog" && <AutoPilot currentBlog={currentBlog} />}
 
         {activeTab === "blogs" && (
           <BlogManager
@@ -364,8 +494,11 @@ export const App: React.FC = () => {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-stone-850 bg-stone-900/40 py-6 text-center text-xs text-stone-500 font-mono">
-        Blogger SEO Command Center · Google Search Console & Blogger Playbook 2026 Engine
+      <footer className="border-t border-stone-850 bg-stone-900/60 py-6 text-center text-xs text-stone-500 font-mono">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>Blogger SEO Command Center · 2026 Growth Playbook</span>
+          <span className="text-[11px] text-stone-600">Google Search Console · Blogger API v3 · AdSense Ready</span>
+        </div>
       </footer>
     </div>
   );

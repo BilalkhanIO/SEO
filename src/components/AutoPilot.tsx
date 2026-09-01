@@ -1,127 +1,190 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Blog } from "../types.js";
-import { Sparkles, Zap, Bot, Rocket, CheckCircle2, ListTree, Play, Loader2 } from "lucide-react";
+import {
+  Sparkles,
+  Zap,
+  Bot,
+  Rocket,
+  CheckCircle2,
+  ListTree,
+  Play,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+  Globe,
+  FileText,
+  AlertTriangle,
+  Send,
+  Sliders,
+  DollarSign,
+  Search,
+} from "lucide-react";
+
+interface AutoPilotLog {
+  timestamp: string;
+  stage: string;
+  type: "info" | "success" | "warn" | "error";
+  message: string;
+}
+
+interface AutoPilotMetrics {
+  pagesCreated: number;
+  postsAudited: number;
+  postsEnriched: number;
+  sitemapsSubmitted: number;
+  urlsIndexed: number;
+  newPostPublished?: string;
+  adsenseReadinessScore: number;
+}
 
 export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog }) => {
+  // 360° Full Auto-Pilot State
+  const [running360, setRunning360] = useState(false);
+  const [autoFixThin, setAutoFixThin] = useState(true);
+  const [autoPublishPolicy, setAutoPublishPolicy] = useState(true);
+  const [autoSubmitSitemaps, setAutoSubmitSitemaps] = useState(true);
+  const [autoIndex, setAutoIndex] = useState(true);
+  const [publishNewPost, setPublishNewPost] = useState(true);
+  const [logs360, setLogs360] = useState<AutoPilotLog[]>([]);
+  const [metrics360, setMetrics360] = useState<AutoPilotMetrics | null>(null);
+
+  // Manual / Single Post Generator State
   const [keyword, setKeyword] = useState("");
-  const [isDraft, setIsDraft] = useState(true);
+  const [isDraft, setIsDraft] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [result, setResult] = useState<any>(null);
-  
+  const [genResult, setGenResult] = useState<any>(null);
+
+  // Instant Indexing State
   const [indexUrl, setIndexUrl] = useState("");
   const [isIndexing, setIsIndexing] = useState(false);
   const [indexResult, setIndexResult] = useState<any>(null);
 
-  // End-to-End Campaign State
-  const [campaignSeed, setCampaignSeed] = useState("");
-  const [campaignCount, setCampaignCount] = useState(3);
-  const [campaignDraft, setCampaignDraft] = useState(true);
-  const [campaignRunning, setCampaignRunning] = useState(false);
-  const [campaignLogs, setCampaignLogs] = useState<{ time: string; msg: string; type: "info" | "success" | "error" }[]>([]);
+  // Content Audit & Issue Resolver
+  const [postsAuditList, setPostsAuditList] = useState<any[]>([]);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [fixingPostId, setFixingPostId] = useState<string | null>(null);
+  const [fixPostMessage, setFixPostMessage] = useState<string | null>(null);
 
-  const addLog = (msg: string, type: "info" | "success" | "error" = "info") => {
-    setCampaignLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg, type }]);
+  useEffect(() => {
+    if (currentBlog) {
+      fetchBlogPostsAudit();
+    }
+  }, [currentBlog]);
+
+  const fetchBlogPostsAudit = async () => {
+    if (!currentBlog?.blogger_blog_id) return;
+    setLoadingAudit(true);
+    try {
+      const res = await fetch(`/api/blogger/audit-posts?blogId=${encodeURIComponent(currentBlog.blogger_blog_id)}`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setPostsAuditList(data);
+      }
+    } catch (err) {
+      console.warn("Audit load error:", err);
+    } finally {
+      setLoadingAudit(false);
+    }
   };
 
-  const handleRunCampaign = async (e: React.FormEvent) => {
+  const handleRun360AutoPilot = async () => {
+    if (!currentBlog) {
+      alert("Please select or configure a blog first.");
+      return;
+    }
+
+    setRunning360(true);
+    setLogs360([
+      {
+        timestamp: new Date().toLocaleTimeString(),
+        stage: "INIT",
+        type: "info",
+        message: `Initiating 360° Automated Optimization for: "${currentBlog.name}"...`,
+      },
+    ]);
+    setMetrics360(null);
+
+    try {
+      const res = await fetch("/api/autopilot/run-360", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blogId: currentBlog.id,
+          options: {
+            autoFixThinContent: autoFixThin,
+            autoPublishPolicyPages: autoPublishPolicy,
+            autoSubmitSitemaps: autoSubmitSitemaps,
+            autoIndexUrls: autoIndex,
+            publishNewArticle: publishNewPost,
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (data.logs && Array.isArray(data.logs)) {
+        setLogs360(data.logs);
+      }
+      if (data.metrics) {
+        setMetrics360(data.metrics);
+      }
+
+      await fetchBlogPostsAudit();
+    } catch (err: any) {
+      setLogs360((prev) => [
+        ...prev,
+        {
+          timestamp: new Date().toLocaleTimeString(),
+          stage: "ERROR",
+          type: "error",
+          message: "Auto-Pilot run failed: " + err.message,
+        },
+      ]);
+    } finally {
+      setRunning360(false);
+    }
+  };
+
+  const handleFixIndividualPost = async (post: any) => {
+    if (!currentBlog?.blogger_blog_id) return;
+    setFixingPostId(post.bloggerPostId);
+    setFixPostMessage(null);
+
+    try {
+      const res = await fetch("/api/blogger/autofix-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bloggerBlogId: currentBlog.blogger_blog_id,
+          bloggerPostId: post.bloggerPostId,
+          title: post.title,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setFixPostMessage(`Successfully enriched "${post.title}"! (${data.changelog?.join(", ") || "Updated"})`);
+        await fetchBlogPostsAudit();
+      } else {
+        alert(data.error || "Failed to auto-fix post");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setFixingPostId(null);
+    }
+  };
+
+  const handleSinglePostGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentBlog) {
       alert("Please select a blog first.");
       return;
     }
-    if (!campaignSeed) return;
-
-    setCampaignRunning(true);
-    setCampaignLogs([]);
-    addLog(`Starting End-to-End Campaign for: "${campaignSeed}"`, "info");
-    addLog(`Target: ${campaignCount} posts, Mode: ${campaignDraft ? "Draft" : "Live Publish"}`, "info");
-
-    try {
-      // Step 1: Research Keywords
-      addLog("Step 1: Researching semantic keywords via Gemini...", "info");
-      const kwRes = await fetch("/api/ai/keywords", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seed: campaignSeed, niche: currentBlog.niche }),
-      });
-      const kwData = await kwRes.json();
-      
-      if (!kwRes.ok || !kwData.clusters) {
-        throw new Error(kwData.error || "Failed to fetch keyword clusters");
-      }
-
-      let keywords: string[] = kwData.clusters.map((c: any) => c.keyword);
-      addLog(`Found ${keywords.length} potential keywords. Selecting top ${campaignCount}...`, "success");
-      
-      const targetKeywords = keywords.slice(0, campaignCount);
-
-      // Step 2: Loop through each keyword to generate and publish
-      for (let i = 0; i < targetKeywords.length; i++) {
-        const targetKw = targetKeywords[i];
-        addLog(`[Post ${i + 1}/${targetKeywords.length}] Generating content for: "${targetKw}"`, "info");
-        
-        try {
-          const postRes = await fetch("/api/ai/autoblog", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              keyword: targetKw,
-              niche: currentBlog.niche,
-              blogId: currentBlog.id,
-              isDraft: campaignDraft,
-            }),
-          });
-          
-          const postData = await postRes.json();
-          if (postRes.ok) {
-            addLog(`[Post ${i + 1}] Successfully pushed to Blogger! Post ID: ${postData.postId}`, "success");
-            
-            // Step 3: Auto-Indexing (if Live)
-            if (!campaignDraft && postData.postUrl) {
-              addLog(`[Post ${i + 1}] Requesting instant indexing for: ${postData.postUrl}`, "info");
-              try {
-                await fetch("/api/tools/index-url", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ url: postData.postUrl }),
-                });
-                addLog(`[Post ${i + 1}] Indexing requested successfully.`, "success");
-              } catch (idxErr) {
-                addLog(`[Post ${i + 1}] Indexing request failed, but post is live.`, "error");
-              }
-            }
-          } else {
-            addLog(`[Post ${i + 1}] Failed: ${postData.error}`, "error");
-          }
-        } catch (postErr: any) {
-          addLog(`[Post ${i + 1}] Error: ${postErr.message}`, "error");
-        }
-
-        // Add a brief delay between posts to prevent rate limiting
-        if (i < targetKeywords.length - 1) {
-          addLog(`Waiting 5 seconds before next post...`, "info");
-          await new Promise(r => setTimeout(r, 5000));
-        }
-      }
-
-      addLog(`Campaign completed successfully!`, "success");
-    } catch (err: any) {
-      addLog(`Campaign halted due to error: ${err.message}`, "error");
-    } finally {
-      setCampaignRunning(false);
-    }
-  };
-
-  const handleAutoBlog = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentBlog) {
-      alert("Please select a blog from the top dropdown first.");
-      return;
-    }
     if (!keyword) return;
 
     setIsGenerating(true);
-    setResult(null);
+    setGenResult(null);
+
     try {
       const res = await fetch("/api/ai/autoblog", {
         method: "POST",
@@ -135,12 +198,11 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
       });
       const data = await res.json();
       if (res.ok) {
-        setResult(data);
-        if (!isDraft && data.postUrl) {
-          setIndexUrl(data.postUrl);
-        }
+        setGenResult(data);
+        setKeyword("");
+        await fetchBlogPostsAudit();
       } else {
-        alert(data.error || "Failed to run Auto-Pilot");
+        alert(data.error || "Failed to publish blog post");
       }
     } catch (err: any) {
       alert("Error: " + err.message);
@@ -149,264 +211,376 @@ export const AutoPilot: React.FC<{ currentBlog: Blog | null }> = ({ currentBlog 
     }
   };
 
-  const handleRequestIndexing = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!indexUrl) return;
-    setIsIndexing(true);
-    setIndexResult(null);
-    try {
-      const res = await fetch("/api/tools/index-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: indexUrl }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setIndexResult(data.response);
-      } else {
-        alert(data.error || "Failed to submit to Google Indexing API");
-      }
-    } catch (err: any) {
-      alert("Error: " + err.message);
-    } finally {
-      setIsIndexing(false);
-    }
-  };
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
-          <Rocket className="w-5 h-5 text-violet-400" />
+    <div className="space-y-6 sm:space-y-8">
+      {/* 360° Hero Launch Section */}
+      <div className="bg-gradient-to-br from-stone-900 via-stone-850 to-stone-900 border border-stone-800 rounded-3xl p-5 sm:p-7 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-2 max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="bg-amber-500/15 text-amber-300 text-xs font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-amber-500/30">
+                <Zap className="w-3.5 h-3.5 text-amber-400" /> Complete Autonomous Engine
+              </span>
+              {currentBlog && (
+                <span className="text-xs text-stone-400 font-mono bg-stone-950/60 px-2.5 py-0.5 rounded-full border border-stone-800">
+                  Target: <strong className="text-stone-200">{currentBlog.name}</strong>
+                </span>
+              )}
+            </div>
+            <h1 className="text-xl sm:text-2xl font-extrabold text-stone-100 tracking-tight flex items-center gap-2">
+              <Rocket className="w-6 h-6 text-amber-400" />
+              360° Google & Blog Auto-Pilot
+            </h1>
+            <p className="text-xs sm:text-sm text-stone-400 leading-relaxed">
+              Once initiated, the autonomous engine scans your entire Blogger site, resolves AdSense policy gaps by auto-publishing mandatory legal pages, expands thin articles to 1,500+ words with Gemini, submits sitemaps to Search Console, and publishes fresh high-intent content.
+            </p>
+          </div>
+
+          {/* Action Button */}
+          <div className="flex flex-col items-stretch lg:items-end gap-3 shrink-0">
+            <button
+              onClick={handleRun360AutoPilot}
+              disabled={running360 || !currentBlog}
+              className="bg-amber-500 hover:bg-amber-400 text-stone-950 text-sm font-bold py-3.5 px-6 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100 cursor-pointer"
+            >
+              {running360 ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Optimizing Ecosystem (360°)...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-5 h-5 fill-stone-950" />
+                  <span>Run Full 360° Auto-Pilot Now</span>
+                </>
+              )}
+            </button>
+
+            {metrics360 && (
+              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Last Cycle Completed Successfully
+              </span>
+            )}
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-bold text-stone-100 tracking-tight">AI Auto-Pilot & Indexing</h1>
-          <p className="text-xs text-stone-400">Generate complete Blogger posts and push them instantly to Google Indexing API.</p>
+
+        {/* Configuration Toggles */}
+        <div className="mt-6 pt-5 border-t border-stone-800 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          <label className="flex items-center gap-2 text-xs text-stone-300 cursor-pointer bg-stone-950/60 p-2.5 rounded-xl border border-stone-850 hover:border-stone-750">
+            <input
+              type="checkbox"
+              checked={autoPublishPolicy}
+              onChange={(e) => setAutoPublishPolicy(e.target.checked)}
+              className="rounded bg-stone-900 border-stone-700 text-amber-500 focus:ring-0 w-4 h-4 cursor-pointer"
+            />
+            <span className="truncate">Auto-Fix Legal Pages</span>
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-stone-300 cursor-pointer bg-stone-950/60 p-2.5 rounded-xl border border-stone-850 hover:border-stone-750">
+            <input
+              type="checkbox"
+              checked={autoFixThin}
+              onChange={(e) => setAutoFixThin(e.target.checked)}
+              className="rounded bg-stone-900 border-stone-700 text-amber-500 focus:ring-0 w-4 h-4 cursor-pointer"
+            />
+            <span className="truncate">Auto-Enrich Thin Posts</span>
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-stone-300 cursor-pointer bg-stone-950/60 p-2.5 rounded-xl border border-stone-850 hover:border-stone-750">
+            <input
+              type="checkbox"
+              checked={autoSubmitSitemaps}
+              onChange={(e) => setAutoSubmitSitemaps(e.target.checked)}
+              className="rounded bg-stone-900 border-stone-700 text-amber-500 focus:ring-0 w-4 h-4 cursor-pointer"
+            />
+            <span className="truncate">Auto-Submit GSC Sitemaps</span>
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-stone-300 cursor-pointer bg-stone-950/60 p-2.5 rounded-xl border border-stone-850 hover:border-stone-750">
+            <input
+              type="checkbox"
+              checked={publishNewPost}
+              onChange={(e) => setPublishNewPost(e.target.checked)}
+              className="rounded bg-stone-900 border-stone-700 text-amber-500 focus:ring-0 w-4 h-4 cursor-pointer"
+            />
+            <span className="truncate">Write & Publish Post</span>
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-stone-300 cursor-pointer bg-stone-950/60 p-2.5 rounded-xl border border-stone-850 hover:border-stone-750 sm:col-span-2 md:col-span-1">
+            <input
+              type="checkbox"
+              checked={autoIndex}
+              onChange={(e) => setAutoIndex(e.target.checked)}
+              className="rounded bg-stone-900 border-stone-700 text-amber-500 focus:ring-0 w-4 h-4 cursor-pointer"
+            />
+            <span className="truncate">Instant Google Indexing</span>
+          </label>
         </div>
       </div>
 
-      {/* End-to-End Campaign Module */}
-      <div className="bg-stone-850 border border-violet-500/30 rounded-2xl p-6 shadow-[0_0_15px_rgba(139,92,246,0.1)]">
-        <div className="flex flex-col md:flex-row gap-6">
-          <div className="flex-1 space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <ListTree className="w-5 h-5 text-violet-400" />
-              <h3 className="text-lg font-bold text-stone-100">End-to-End Automated Campaign</h3>
+      {/* Real-Time Terminal / Execution Logs */}
+      {(running360 || logs360.length > 0) && (
+        <div className="bg-stone-950 border border-stone-800 rounded-3xl p-5 shadow-inner">
+          <div className="flex items-center justify-between border-b border-stone-850 pb-3 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
+              <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+              <span className="text-xs text-stone-400 font-mono ml-2">Auto-Pilot Live Execution Console</span>
             </div>
-            <p className="text-xs text-stone-400 leading-relaxed max-w-lg">
-              Fully automate the SEO lifecycle. Provide a seed topic, and the agent will discover keywords, research briefs, write HTML-optimized blog posts, and publish them to Blogger automatically.
+            {running360 && (
+              <span className="text-xs text-amber-400 font-medium flex items-center gap-1.5 animate-pulse">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Processing...
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-1.5 font-mono text-xs max-h-64 overflow-y-auto pr-2">
+            {logs360.map((log, idx) => (
+              <div key={idx} className="flex items-start gap-2.5">
+                <span className="text-stone-600 shrink-0 select-none">[{log.timestamp}]</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                    log.stage === "ADSENSE"
+                      ? "bg-amber-500/20 text-amber-300"
+                      : log.stage === "CONTENT"
+                      ? "bg-sky-500/20 text-sky-300"
+                      : log.stage === "GSC"
+                      ? "bg-emerald-500/20 text-emerald-300"
+                      : log.stage === "INDEXING"
+                      ? "bg-purple-500/20 text-purple-300"
+                      : log.stage === "PUBLISH"
+                      ? "bg-pink-500/20 text-pink-300"
+                      : "bg-stone-800 text-stone-300"
+                  }`}
+                >
+                  {log.stage}
+                </span>
+                <span
+                  className={`leading-relaxed ${
+                    log.type === "success"
+                      ? "text-emerald-400 font-semibold"
+                      : log.type === "warn"
+                      ? "text-amber-400"
+                      : log.type === "error"
+                      ? "text-rose-400 font-semibold"
+                      : "text-stone-300"
+                  }`}
+                >
+                  {log.message}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Metrics Scorecard from Auto-Pilot Run */}
+      {metrics360 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+          <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
+            <span className="text-[11px] text-stone-400 font-medium flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" /> AdSense Readiness
+            </span>
+            <p className="text-xl sm:text-2xl font-extrabold text-stone-100 font-mono mt-1">{metrics360.adsenseReadinessScore}%</p>
+            <span className="text-[10px] text-emerald-400 mt-0.5 block font-mono">Policy Compliant</span>
+          </div>
+
+          <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
+            <span className="text-[11px] text-stone-400 font-medium">Pages Auto-Created</span>
+            <p className="text-xl sm:text-2xl font-extrabold text-stone-100 font-mono mt-1">+{metrics360.pagesCreated}</p>
+            <span className="text-[10px] text-stone-500 mt-0.5 block font-mono">Legal/Policy pages</span>
+          </div>
+
+          <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
+            <span className="text-[11px] text-stone-400 font-medium">Posts Auto-Enriched</span>
+            <p className="text-xl sm:text-2xl font-extrabold text-stone-100 font-mono mt-1">+{metrics360.postsEnriched}</p>
+            <span className="text-[10px] text-sky-400 mt-0.5 block font-mono">1500+ Words & Schema</span>
+          </div>
+
+          <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
+            <span className="text-[11px] text-stone-400 font-medium">Sitemaps Submitted</span>
+            <p className="text-xl sm:text-2xl font-extrabold text-stone-100 font-mono mt-1">{metrics360.sitemapsSubmitted}</p>
+            <span className="text-[10px] text-emerald-400 mt-0.5 block font-mono">To Search Console</span>
+          </div>
+
+          <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm col-span-2 sm:col-span-1">
+            <span className="text-[11px] text-stone-400 font-medium">URLs Indexed</span>
+            <p className="text-xl sm:text-2xl font-extrabold text-stone-100 font-mono mt-1">{metrics360.urlsIndexed}</p>
+            <span className="text-[10px] text-purple-400 mt-0.5 block font-mono">Instant Google Indexing</span>
+          </div>
+        </div>
+      )}
+
+      {/* Content Quality Audit & One-Click AI Post Enhancer */}
+      <div className="bg-stone-900/90 border border-stone-800 rounded-3xl p-5 sm:p-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-800 pb-4 mb-4">
+          <div>
+            <h3 className="text-base font-bold text-stone-100 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-sky-400" />
+              Live Blogger Content Audit & Quality Fixer
+            </h3>
+            <p className="text-xs text-stone-400 mt-0.5">
+              Identifies thin content (&lt;800 words), missing H2 subheadings, missing image ALT tags, and missing FAQ schema.
             </p>
+          </div>
 
-            <form onSubmit={handleRunCampaign} className="space-y-4 pt-2">
-              <div>
-                <label className="block text-xs font-semibold text-stone-300 mb-1">Seed Topic / Niche</label>
-                <input
-                  type="text"
-                  value={campaignSeed}
-                  onChange={(e) => setCampaignSeed(e.target.value)}
-                  placeholder="e.g. Minimalist home office setups"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-stone-900 border border-stone-700 text-stone-100 text-sm focus:outline-none focus:border-violet-500"
-                  required
-                  disabled={campaignRunning}
-                />
-              </div>
+          <button
+            onClick={fetchBlogPostsAudit}
+            disabled={loadingAudit}
+            className="text-xs text-stone-300 hover:text-white bg-stone-850 hover:bg-stone-750 border border-stone-750 px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors self-start sm:self-auto cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingAudit ? "animate-spin" : ""}`} />
+            Refresh Audit
+          </button>
+        </div>
 
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-xs font-semibold text-stone-300 mb-1">Posts to Generate</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={campaignCount}
-                    onChange={(e) => setCampaignCount(parseInt(e.target.value))}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-stone-900 border border-stone-700 text-stone-100 text-sm focus:outline-none focus:border-violet-500"
-                    required
-                    disabled={campaignRunning}
-                  />
-                </div>
-                <div className="flex-1 flex items-end pb-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="campaignDraft"
-                      checked={campaignDraft}
-                      onChange={(e) => setCampaignDraft(e.target.checked)}
-                      className="rounded border-stone-700 bg-stone-900 text-violet-500 focus:ring-violet-500"
-                      disabled={campaignRunning}
-                    />
-                    <label htmlFor="campaignDraft" className="text-xs text-stone-300 font-semibold cursor-pointer">
-                      Publish as Draft
-                    </label>
+        {fixPostMessage && (
+          <div className="mb-4 bg-emerald-950/80 border border-emerald-500/30 text-emerald-300 text-xs px-3.5 py-2 rounded-xl flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{fixPostMessage}</span>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {postsAuditList.map((post) => {
+            const audit = post.audit;
+            const isThin = audit && audit.wordCount < 800;
+            const isFixing = fixingPostId === post.bloggerPostId;
+
+            return (
+              <div
+                key={post.bloggerPostId}
+                className="bg-stone-950/70 border border-stone-850 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-stone-750 transition-colors"
+              >
+                <div className="space-y-1.5 max-w-2xl min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border font-mono ${
+                        audit?.seoScore >= 80
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                          : audit?.seoScore >= 60
+                          ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                          : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                      }`}
+                    >
+                      SEO Score: {audit?.seoScore || 0}/100
+                    </span>
+
+                    {isThin && (
+                      <span className="text-[10px] font-bold bg-rose-500/10 text-rose-400 px-2 py-0.5 rounded-md border border-rose-500/20 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> Thin Content
+                      </span>
+                    )}
+
+                    <span className="text-[11px] text-stone-400">
+                      Words: <strong className="text-stone-200 font-mono">{audit?.wordCount || 0}</strong> • Headings:{" "}
+                      <strong className="text-stone-200 font-mono">{audit?.headingsCount || 0}</strong> • FAQs:{" "}
+                      <strong className="text-stone-200">{audit?.hasFaqSection ? "Yes" : "No"}</strong>
+                    </span>
                   </div>
+
+                  <h4 className="text-sm font-bold text-stone-100 truncate">{post.title}</h4>
+
+                  {audit?.issues && audit.issues.length > 0 && (
+                    <p className="text-xs text-amber-400/90 leading-relaxed">{audit.issues.join(" • ")}</p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 self-start md:self-center shrink-0">
+                  <button
+                    onClick={() => handleFixIndividualPost(post)}
+                    disabled={isFixing}
+                    className="text-xs font-semibold bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 ${isFixing ? "animate-spin" : ""}`} />
+                    {isFixing ? "Enriching with Gemini..." : "Auto-Fix & Enrich Post"}
+                  </button>
                 </div>
               </div>
+            );
+          })}
+
+          {postsAuditList.length === 0 && !loadingAudit && (
+            <div className="py-8 text-center text-stone-500 text-xs">
+              No posts found on Blogger yet. Use the generator below to publish your first post!
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Manual Targeted Post Generator */}
+      <div className="bg-stone-900/90 border border-stone-800 rounded-3xl p-5 sm:p-6 shadow-sm">
+        <h3 className="text-base font-bold text-stone-100 flex items-center gap-2 mb-1.5">
+          <Sparkles className="w-5 h-5 text-amber-400" />
+          Targeted AI Article Publisher (1,500+ Words + Schema.org)
+        </h3>
+        <p className="text-xs text-stone-400 mb-4">
+          Provide a keyword to generate a complete, structured article with comparison tables, FAQ schema, and instant Blogger publishing.
+        </p>
+
+        <form onSubmit={handleSinglePostGenerate} className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="e.g. Best SEO Tips for Blogger in 2026"
+              className="flex-1 bg-stone-950 border border-stone-700 rounded-xl px-4 py-2.5 text-xs text-stone-100 placeholder-stone-500 focus:outline-none focus:border-amber-500"
+              required
+            />
+
+            <div className="flex items-center gap-3 justify-between sm:justify-start">
+              <label className="flex items-center gap-2 text-xs text-stone-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isDraft}
+                  onChange={(e) => setIsDraft(e.target.checked)}
+                  className="rounded bg-stone-950 border-stone-700 text-amber-500 focus:ring-0 w-4 h-4 cursor-pointer"
+                />
+                <span>Save as Draft</span>
+              </label>
 
               <button
                 type="submit"
-                disabled={campaignRunning || !currentBlog}
-                className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold text-sm shadow transition-all flex items-center justify-center gap-2 mt-4"
+                disabled={isGenerating || !currentBlog}
+                className="bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold py-2.5 px-5 rounded-xl flex items-center gap-2 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
               >
-                {campaignRunning ? (
+                {isGenerating ? (
                   <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Campaign Running...
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Writing with Gemini...</span>
                   </>
                 ) : (
                   <>
-                    <Play className="w-5 h-5 fill-current" />
-                    Start Automated Campaign
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Generate & Publish</span>
                   </>
                 )}
               </button>
-              {!currentBlog && (
-                <p className="text-[10px] text-amber-500 text-center">Please select a blog from the top menu to start.</p>
-              )}
-            </form>
-          </div>
-
-          {/* Campaign Console */}
-          <div className="flex-1 flex flex-col min-h-[300px]">
-            <label className="block text-xs font-semibold text-stone-400 mb-2">Campaign Console</label>
-            <div className="flex-1 bg-stone-950 border border-stone-800 rounded-xl p-4 overflow-y-auto font-mono text-[11px] space-y-2">
-              {campaignLogs.length === 0 ? (
-                <span className="text-stone-600">Waiting to start campaign...</span>
-              ) : (
-                campaignLogs.map((log, i) => (
-                  <div key={i} className={`flex gap-2 ${
-                    log.type === 'error' ? 'text-red-400' :
-                    log.type === 'success' ? 'text-emerald-400' : 'text-stone-300'
-                  }`}>
-                    <span className="text-stone-600 shrink-0">[{log.time}]</span>
-                    <span>{log.msg}</span>
-                  </div>
-                ))
-              )}
-              {campaignRunning && (
-                <div className="flex gap-2 text-violet-400 animate-pulse mt-2">
-                  <span className="text-stone-600">[{new Date().toLocaleTimeString()}]</span>
-                  <span>Working...</span>
-                </div>
-              )}
             </div>
           </div>
-        </div>
-      </div>
+        </form>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Module 1: AI Auto-Blogger (Single Post) */}
-        <div className="bg-stone-850 border border-stone-700/60 rounded-2xl p-5 space-y-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Bot className="w-5 h-5 text-violet-400" />
-            <h3 className="text-sm font-bold text-stone-200">Single Post Auto-Blogger</h3>
-          </div>
-          <p className="text-xs text-stone-400">
-            Write a full SEO-optimized HTML article for a specific keyword and push it to your account.
-          </p>
-          
-          <form onSubmit={handleAutoBlog} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-stone-300 mb-1">Target Keyword</label>
-              <input
-                type="text"
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                placeholder="e.g. Best pour over coffee makers 2026"
-                className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-700 text-stone-100 text-sm focus:outline-none focus:border-violet-500"
-                required
-              />
+        {genResult && (
+          <div className="mt-4 bg-stone-950 border border-emerald-500/30 rounded-2xl p-4">
+            <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold mb-1">
+              <CheckCircle2 className="w-4 h-4" /> Published Successfully to Blogger!
             </div>
-            
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="isDraftSingle"
-                checked={isDraft}
-                onChange={(e) => setIsDraft(e.target.checked)}
-                className="rounded border-stone-700 bg-stone-900 text-violet-500 focus:ring-violet-500"
-              />
-              <label htmlFor="isDraftSingle" className="text-xs text-stone-300 font-semibold cursor-pointer">
-                Publish as Draft (Recommended)
-              </label>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isGenerating || !currentBlog}
-              className="w-full py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-white font-bold text-sm shadow transition-all flex items-center justify-center gap-2 border border-stone-700"
-            >
-              {isGenerating ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Generating & Publishing...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 text-violet-400" />
-                  Generate Single Post
-                </>
-              )}
-            </button>
-          </form>
-
-          {result && (
-            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl mt-4">
-              <div className="flex items-center gap-2 text-emerald-400 mb-2">
-                <CheckCircle2 className="w-4 h-4" />
-                <span className="text-sm font-bold">Successfully pushed to Blogger!</span>
-              </div>
-              <a href={result.postUrl} target="_blank" rel="noreferrer" className="text-xs text-emerald-300 hover:underline">
-                View on Blogger (Post ID: {result.postId})
+            <p className="text-xs text-stone-300 font-medium">{genResult.title}</p>
+            {genResult.postUrl && (
+              <a
+                href={genResult.postUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-amber-400 hover:underline mt-1 inline-flex items-center gap-1 cursor-pointer"
+              >
+                View Live Article <Globe className="w-3 h-3" />
               </a>
-            </div>
-          )}
-        </div>
-
-        {/* Module 2: Instant Indexing API */}
-        <div className="bg-stone-850 border border-stone-700/60 rounded-2xl p-5 space-y-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Zap className="w-5 h-5 text-amber-500" />
-            <h3 className="text-sm font-bold text-stone-200">Google Indexing API</h3>
+            )}
           </div>
-          <p className="text-xs text-stone-400">
-            Force Google to crawl your URL immediately. Use sparingly for new or heavily updated content.
-          </p>
-
-          <form onSubmit={handleRequestIndexing} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-stone-300 mb-1">Live URL to Index</label>
-              <input
-                type="url"
-                value={indexUrl}
-                onChange={(e) => setIndexUrl(e.target.value)}
-                placeholder="https://yourblog.blogspot.com/2026/08/post.html"
-                className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-700 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
-                required
-              />
-            </div>
-            
-            <button
-              type="submit"
-              disabled={isIndexing}
-              className="w-full py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-stone-200 font-bold text-sm shadow transition-all flex items-center justify-center gap-2 border border-stone-700"
-            >
-              {isIndexing ? "Submitting to Google..." : "Request Instant Indexing"}
-            </button>
-          </form>
-
-          {indexResult && (
-            <div className="p-4 bg-stone-900 border border-stone-800 rounded-xl mt-4 overflow-auto text-[10px] font-mono text-stone-400">
-              <div className="text-emerald-400 mb-2 flex items-center gap-2 font-bold text-xs font-sans">
-                <CheckCircle2 className="w-4 h-4" />
-                Notification Sent!
-              </div>
-              <pre>{JSON.stringify(indexResult, null, 2)}</pre>
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
 };
-
-

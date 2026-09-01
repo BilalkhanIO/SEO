@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { migrate, all, run } from "./src/store.js";
 import { hasCredentials, getOAuthClient, storeTokens, SCOPES } from "./src/google/auth.js";
 import * as gsc from "./src/google/gsc.js";
@@ -13,12 +12,16 @@ import { articleSchema, faqSchema, howToSchema } from "./src/content/schema.js";
 import { runRecipes, saveAlerts } from "./src/tracking/recipes.js";
 import * as outreach from "./src/outreach/outreach.js";
 import { loadConfig } from "./src/config.js";
-import { runAutomationCycle } from "./src/automation/routine.js";
+import * as adsense from "./src/google/adsense.js";
+import * as analytics from "./src/google/analytics.js";
+import { runAutomationCycle, run360AutoPilot } from "./src/automation/routine.js";
 import {
   generateSeoBriefWithGemini,
   generateSeoMetadataWithGemini,
   expandKeywordsWithGemini,
   generateAutoBlogPost,
+  fixAndEnrichBlogPost,
+  generatePolicyPage,
 } from "./src/ai/gemini.js";
 
 export function createApp() {
@@ -854,6 +857,245 @@ export function createApp() {
     }
   });
 
+  /* ------------------- GOOGLE ADSENSE ROUTES ------------------- */
+
+  app.get("/api/adsense/accounts", async (req, res) => {
+    try {
+      const accounts = await adsense.listAdSenseAccounts();
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/adsense/sites", async (req, res) => {
+    try {
+      const accountName = req.query.accountName as string;
+      if (!accountName) return res.status(400).json({ error: "accountName query param required" });
+      const sites = await adsense.listAdSenseSites(accountName);
+      res.json(sites);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/adsense/units", async (req, res) => {
+    try {
+      const accountName = req.query.accountName as string;
+      if (!accountName) return res.status(400).json({ error: "accountName query param required" });
+      const units = await adsense.listAdUnits(accountName);
+      res.json(units);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/adsense/alerts", async (req, res) => {
+    try {
+      const accountName = req.query.accountName as string;
+      if (!accountName) return res.status(400).json({ error: "accountName query param required" });
+      const alerts = await adsense.listAdSenseAlerts(accountName);
+      res.json(alerts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/adsense/report", async (req, res) => {
+    try {
+      const accountName = req.query.accountName as string;
+      const days = parseInt((req.query.days as string) || "30", 10);
+      if (!accountName) return res.status(400).json({ error: "accountName query param required" });
+      const report = await adsense.getAdSenseReport(accountName, days);
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/adsense/audit", async (req, res) => {
+    try {
+      const { blogId } = req.body;
+      if (!blogId) return res.status(400).json({ error: "blogId required" });
+      const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
+      if (!blog || !blog.blogger_blog_id) return res.status(404).json({ error: "Linked Blogger blog not found" });
+
+      const pages = await blogger.listPages(blog.blogger_blog_id);
+      const posts = await blogger.listPosts(blog.blogger_blog_id, 50, "LIVE");
+
+      const audit = adsense.auditAdSenseReadiness({
+        blogUrl: blog.url,
+        postCount: posts.length,
+        pages,
+        posts: posts.map((p) => ({ title: p.title, wordCount: p.audit?.wordCount })),
+        hasCustomDomain: blog.is_custom_domain === 1,
+      });
+
+      res.json({
+        blog: { name: blog.name, url: blog.url },
+        pagesCount: pages.length,
+        postsCount: posts.length,
+        audit,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/adsense/generate-adstxt", (req, res) => {
+    try {
+      const { publisherId } = req.body;
+      if (!publisherId) return res.status(400).json({ error: "publisherId is required" });
+      const adsTxt = adsense.generateAdsTxt(publisherId);
+      res.json({ adsTxt });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/adsense/autofix-pages", async (req, res) => {
+    try {
+      const { blogId, pageType } = req.body;
+      if (!blogId || !pageType) return res.status(400).json({ error: "blogId and pageType required" });
+      const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
+      if (!blog || !blog.blogger_blog_id) return res.status(404).json({ error: "Blog not found" });
+
+      const pageData = await generatePolicyPage(pageType, blog.name, blog.url);
+      const inserted = await blogger.insertPage({
+        blogId: blog.blogger_blog_id,
+        title: pageData.title,
+        contentHtml: pageData.htmlContent,
+        isDraft: false,
+      });
+
+      res.json({ success: true, page: inserted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /* ------------------- GOOGLE ANALYTICS (GA4) ROUTES ------------------- */
+
+  app.get("/api/analytics/properties", async (req, res) => {
+    try {
+      const properties = await analytics.listGa4Properties();
+      res.json(properties);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/analytics/report", async (req, res) => {
+    try {
+      const propertyId = req.query.propertyId as string;
+      const days = parseInt((req.query.days as string) || "30", 10);
+      if (!propertyId) return res.status(400).json({ error: "propertyId required" });
+      const report = await analytics.getGa4TrafficSummary(propertyId, days);
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/analytics/top-pages", async (req, res) => {
+    try {
+      const propertyId = req.query.propertyId as string;
+      if (!propertyId) return res.status(400).json({ error: "propertyId required" });
+      const topPages = await analytics.getGa4TopPages(propertyId);
+      res.json(topPages);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /* ------------------- GSC STRIKING DISTANCE & SITEMAPS ------------------- */
+
+  app.get("/api/gsc/striking-distance", async (req, res) => {
+    try {
+      const siteUrl = req.query.siteUrl as string;
+      if (!siteUrl) return res.status(400).json({ error: "siteUrl required" });
+      const items = await gsc.getStrikingDistanceKeywords(siteUrl);
+      res.json(items);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/gsc/submit-sitemaps", async (req, res) => {
+    try {
+      const { siteUrl } = req.body;
+      if (!siteUrl) return res.status(400).json({ error: "siteUrl required" });
+      const submitted = await gsc.submitDefaultSitemaps(siteUrl);
+      res.json({ success: true, submitted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /* ------------------- BLOGGER PAGES & DEEP AUDITS ------------------- */
+
+  app.get("/api/blogger/pages", async (req, res) => {
+    try {
+      const blogId = req.query.blogId as string;
+      if (!blogId) return res.status(400).json({ error: "blogId required" });
+      const pages = await blogger.listPages(blogId);
+      res.json(pages);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/blogger/audit-posts", async (req, res) => {
+    try {
+      const blogId = req.query.blogId as string;
+      if (!blogId) return res.status(400).json({ error: "blogId required" });
+      const posts = await blogger.listPosts(blogId, 50, "LIVE");
+      res.json(posts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/blogger/autofix-post", async (req, res) => {
+    try {
+      const { bloggerBlogId, bloggerPostId, title, keyword } = req.body;
+      if (!bloggerBlogId || !bloggerPostId) return res.status(400).json({ error: "bloggerBlogId and bloggerPostId required" });
+
+      const postData = await blogger.getPost(bloggerBlogId, bloggerPostId);
+      if (!postData.content) return res.status(400).json({ error: "Post has no content to fix" });
+
+      const fixed = await fixAndEnrichBlogPost(postData.content, title || postData.title || "Blog Post", keyword);
+      const updated = await blogger.updatePost(bloggerBlogId, bloggerPostId, {
+        title: fixed.improvedTitle,
+        content: fixed.improvedHtml,
+      });
+
+      // Notify Indexing API if live
+      if (postData.url) {
+        try {
+          await gsc.requestGoogleIndexing(postData.url, "URL_UPDATED");
+        } catch {}
+      }
+
+      res.json({ success: true, updated, changelog: fixed.changelog });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /* ------------------- 360° COMPLETE AUTO-PILOT ENGINE ------------------- */
+
+  app.post("/api/autopilot/run-360", async (req, res) => {
+    try {
+      const { blogId, options } = req.body;
+      if (!blogId) return res.status(400).json({ error: "blogId required" });
+      const result = await run360AutoPilot(blogId, options || {});
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return app;
 }
 
@@ -864,6 +1106,7 @@ export async function startServer() {
   /* ------------------- FRONTEND / VITE ------------------- */
 
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

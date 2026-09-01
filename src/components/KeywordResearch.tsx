@@ -278,7 +278,7 @@ export const KeywordResearch: React.FC<KeywordResearchProps> = ({
   return (
     <div className="space-y-6">
       {/* Header & Sub-Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-800 pb-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-stone-800 pb-4">
         <div>
           <h2 className="text-xl font-bold text-stone-100 flex items-center gap-2">
             <Search className="w-5 h-5 text-amber-400" />
@@ -289,10 +289,10 @@ export const KeywordResearch: React.FC<KeywordResearchProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-stone-900 p-1 rounded-xl border border-stone-800">
+        <div className="flex items-center gap-1.5 bg-stone-900/90 p-1.5 rounded-2xl border border-stone-800 overflow-x-auto max-w-full">
           <button
             onClick={() => setActiveTab("harvest")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
               activeTab === "harvest"
                 ? "bg-amber-500 text-stone-950 shadow"
                 : "text-stone-400 hover:text-stone-200"
@@ -302,7 +302,7 @@ export const KeywordResearch: React.FC<KeywordResearchProps> = ({
           </button>
           <button
             onClick={() => setActiveTab("ai")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
               activeTab === "ai"
                 ? "bg-amber-500 text-stone-950 shadow"
                 : "text-stone-400 hover:text-stone-200"
@@ -313,7 +313,7 @@ export const KeywordResearch: React.FC<KeywordResearchProps> = ({
           </button>
           <button
             onClick={() => setActiveTab("mine")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
               activeTab === "mine"
                 ? "bg-amber-500 text-stone-950 shadow"
                 : "text-stone-400 hover:text-stone-200"
@@ -323,7 +323,7 @@ export const KeywordResearch: React.FC<KeywordResearchProps> = ({
           </button>
           <button
             onClick={() => setActiveTab("list")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
               activeTab === "list"
                 ? "bg-amber-500 text-stone-950 shadow"
                 : "text-stone-400 hover:text-stone-200"

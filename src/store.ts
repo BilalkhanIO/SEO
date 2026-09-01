@@ -1,4 +1,6 @@
 import { createClient, type Client, type InValue } from "@libsql/client";
+import fs from "node:fs";
+import path from "node:path";
 import { loadConfig } from "./config.js";
 
 let _db: Client | null = null;
@@ -6,7 +8,19 @@ let _db: Client | null = null;
 export function db(): Client {
   if (!_db) {
     const cfg = loadConfig();
-    _db = createClient({ url: cfg.databaseUrl, authToken: cfg.databaseAuthToken });
+    try {
+      if (cfg.databaseUrl.startsWith("file:") && !cfg.databaseUrl.includes(":memory:")) {
+        const filePath = cfg.databaseUrl.replace(/^file:/, "");
+        const dir = path.dirname(filePath);
+        if (dir && !fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+      }
+      _db = createClient({ url: cfg.databaseUrl, authToken: cfg.databaseAuthToken });
+    } catch (err) {
+      console.warn("Libsql init failed, falling back to in-memory SQLite:", err);
+      _db = createClient({ url: "file::memory:?cache=shared" });
+    }
   }
   return _db;
 }
@@ -103,16 +117,50 @@ CREATE TABLE IF NOT EXISTS prospects (
 `;
 
 export async function migrate(): Promise<void> {
-  const statements = SCHEMA.split(";").map((s) => s.trim()).filter(Boolean);
-  for (const stmt of statements) await db().execute(stmt);
+  try {
+    const statements = SCHEMA.split(";").map((s) => s.trim()).filter(Boolean);
+    for (const stmt of statements) {
+      await db().execute(stmt);
+    }
+  } catch (err) {
+    console.error("Migration error:", err);
+  }
 }
 
 export async function all<T = Record<string, unknown>>(sql: string, args: InValue[] = []): Promise<T[]> {
-  const res = await db().execute({ sql, args });
-  return res.rows as unknown as T[];
+  try {
+    const res = await db().execute({ sql, args });
+    return (res.rows || []) as unknown as T[];
+  } catch (err: any) {
+    if (err?.message?.includes("no such table")) {
+      await migrate();
+      try {
+        const retryRes = await db().execute({ sql, args });
+        return (retryRes.rows || []) as unknown as T[];
+      } catch (retryErr) {
+        console.error("Retry all query failed:", retryErr);
+      }
+    }
+    console.error("Query failed in all():", sql, err?.message);
+    return [];
+  }
 }
 
 export async function run(sql: string, args: InValue[] = []): Promise<number | bigint | undefined> {
-  const res = await db().execute({ sql, args });
-  return res.lastInsertRowid;
+  try {
+    const res = await db().execute({ sql, args });
+    return res.lastInsertRowid;
+  } catch (err: any) {
+    if (err?.message?.includes("no such table")) {
+      await migrate();
+      try {
+        const retryRes = await db().execute({ sql, args });
+        return retryRes.lastInsertRowid;
+      } catch (retryErr) {
+        console.error("Retry run query failed:", retryErr);
+      }
+    }
+    console.error("Query failed in run():", sql, err?.message);
+    return undefined;
+  }
 }

@@ -158,7 +158,7 @@ export const ContentPipeline: React.FC<ContentPipelineProps> = ({
             setFormStage("idea");
             setShowCreateModal(true);
           }}
-          className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow flex items-center gap-2"
+          className="px-4 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           New Pipeline Post
@@ -166,13 +166,13 @@ export const ContentPipeline: React.FC<ContentPipelineProps> = ({
       </div>
 
       {/* Stage Filter Pills */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-2">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none">
         <button
           onClick={() => setSelectedStage("all")}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+          className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
             selectedStage === "all"
-              ? "bg-amber-500 text-stone-950 font-bold"
-              : "bg-stone-850 text-stone-300 hover:bg-stone-800 border border-stone-800"
+              ? "bg-amber-500 text-stone-950 font-bold shadow-sm"
+              : "bg-stone-900 text-stone-300 hover:bg-stone-850 border border-stone-800"
           }`}
         >
           All ({posts.length})
@@ -183,10 +183,10 @@ export const ContentPipeline: React.FC<ContentPipelineProps> = ({
             <button
               key={s}
               onClick={() => setSelectedStage(s)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap capitalize transition-all ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap capitalize transition-all cursor-pointer ${
                 selectedStage === s
-                  ? "bg-amber-500 text-stone-950 font-bold"
-                  : "bg-stone-850 text-stone-400 hover:bg-stone-800 border border-stone-800"
+                  ? "bg-amber-500 text-stone-950 font-bold shadow-sm"
+                  : "bg-stone-900 text-stone-400 hover:bg-stone-850 border border-stone-800"
               }`}
             >
               {s} ({count})
@@ -199,7 +199,7 @@ export const ContentPipeline: React.FC<ContentPipelineProps> = ({
       {loading ? (
         <div className="py-12 text-center text-stone-400 text-sm">Loading pipeline...</div>
       ) : filteredPosts.length === 0 ? (
-        <div className="py-16 text-center bg-stone-850 rounded-2xl border border-dashed border-stone-800">
+        <div className="py-16 text-center bg-stone-900/60 rounded-3xl border border-dashed border-stone-800">
           <Layers className="w-8 h-8 text-stone-600 mx-auto mb-2" />
           <p className="text-sm font-semibold text-stone-300">No posts in this stage</p>
           <p className="text-xs text-stone-500 mt-1">Create a new post or generate a brief from a harvested keyword.</p>
@@ -209,12 +209,12 @@ export const ContentPipeline: React.FC<ContentPipelineProps> = ({
           {filteredPosts.map((post) => (
             <div
               key={post.id}
-              className="bg-stone-850 border border-stone-700/60 rounded-2xl p-5 space-y-4 hover:border-stone-600 transition-all flex flex-col justify-between"
+              className="bg-stone-900/90 border border-stone-800 rounded-3xl p-5 space-y-4 hover:border-stone-700 transition-all flex flex-col justify-between shadow-sm"
             >
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-stone-800 text-amber-300 border border-stone-700">
-                    Stage: {post.stage}
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-stone-850 text-amber-300 border border-stone-750 font-mono">
+                    {post.stage}
                   </span>
                   <span className="text-xs text-stone-500 font-mono">#{post.id}</span>
                 </div>
@@ -226,14 +226,14 @@ export const ContentPipeline: React.FC<ContentPipelineProps> = ({
                 )}
               </div>
 
-              <div className="space-y-3 pt-3 border-t border-stone-800">
+              <div className="space-y-3 pt-3 border-t border-stone-850">
                 {/* Stage Progression Selector */}
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] text-stone-400 font-medium">Move Stage:</span>
                   <select
                     value={post.stage}
                     onChange={(e) => handleUpdateStage(post.id, e.target.value as Post["stage"])}
-                    className="px-2 py-1 bg-stone-900 border border-stone-700 rounded-lg text-xs text-stone-200 capitalize font-medium"
+                    className="px-2 py-1 bg-stone-950 border border-stone-750 rounded-lg text-xs text-stone-200 capitalize font-medium cursor-pointer"
                   >
                     {STAGES.map((s) => (
                       <option key={s} value={s}>
@@ -247,14 +247,14 @@ export const ContentPipeline: React.FC<ContentPipelineProps> = ({
                   {post.brief_md && (
                     <button
                       onClick={() => setActiveBriefPost(post)}
-                      className="text-xs text-sky-400 hover:text-sky-300 font-semibold flex items-center gap-1"
+                      className="text-xs text-sky-400 hover:text-sky-300 font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       View Brief
                     </button>
                   )}
                   <button
                     onClick={() => onValidatePost(post.title, post.keyword)}
-                    className="ml-auto px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold flex items-center gap-1"
+                    className="ml-auto px-2.5 py-1 rounded-xl bg-stone-800 hover:bg-stone-750 text-stone-200 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
                   >
                     <FileCheck className="w-3.5 h-3.5 text-emerald-400" />
                     Validate Gate
