@@ -12,7 +12,7 @@ import * as blogger from "./google/blogger.js";
 import { runPageSpeed } from "./google/pagespeed.js";
 import { harvest } from "./keywords/autocomplete.js";
 import { fetchSerp, enrichSerp, briefFromSerp } from "./serp/serp.js";
-import { validatePost, formatIssues } from "./content/validate.js";
+import { validatePost, blockingIssues, formatIssues } from "./content/validate.js";
 import { articleSchema, faqSchema } from "./content/schema.js";
 import { runRecipes, saveAlerts } from "./tracking/recipes.js";
 import * as outreach from "./outreach/outreach.js";
@@ -171,7 +171,11 @@ kw.command("score <keywordId>")
   .option("--notes <text>")
   .action(async (keywordId: string, o: { relevance: string; intentFit: string; winnable: string; traffic: string; value: string; intent?: string; notes?: string }) => {
     await migrate();
-    const s = [o.relevance, o.intentFit, o.winnable, o.traffic, o.value].map((x) => Math.max(0, Math.min(2, parseInt(x))));
+    const raw = [o.relevance, o.intentFit, o.winnable, o.traffic, o.value];
+    if (raw.some((x) => Number.isNaN(parseInt(x)))) {
+      throw new Error("--relevance, --intent-fit, --winnable, --traffic and --value must all be numbers 0-2");
+    }
+    const s = raw.map((x) => Math.max(0, Math.min(2, parseInt(x))));
     const total = s.reduce((a, b) => a + b, 0);
     await run(
       `UPDATE keywords SET score_relevance=?, score_intent=?, score_winnable=?, score_traffic=?, score_value=?, score_total=?,
@@ -220,10 +224,31 @@ post.command("publish <htmlFile>")
   .option("--blog <idOrUrl>")
   .option("--labels <labels>", "comma-separated")
   .option("--live", "publish immediately instead of draft (only if permalink already set)")
-  .action(async (htmlFile: string, o: { title: string; blog?: string; labels?: string; live?: boolean }) => {
+  .option("--description <desc>", "the Blogger Search Description you'll paste (checked by the pre-publish gate)")
+  .option("--keyword <kw>")
+  .option("--permalink-set", "confirm the custom permalink is set in the Blogger editor")
+  .option("--force", "publish live even if the pre-publish gate finds blocking issues")
+  .action(async (htmlFile: string, o: { title: string; blog?: string; labels?: string; live?: boolean; description?: string; keyword?: string; permalinkSet?: boolean; force?: boolean }) => {
     const blog = await requireBlog(o.blog);
     if (!blog.blogger_blog_id) throw new Error("Blog has no Blogger ID — run `seo blogs sync`.");
     const html = fs.readFileSync(htmlFile, "utf8");
+
+    // Playbook §4 stage 5: block a live publish until the pre-publish gate passes.
+    // A draft insert is low-risk (nothing goes live), so the gate only applies to --live.
+    if (o.live && !o.force) {
+      const issues = validatePost({
+        title: o.title, html, searchDescription: o.description, keyword: o.keyword,
+        permalinkSet: !!o.permalinkSet, siteUrl: blog.url,
+      });
+      const blocking = blockingIssues(issues);
+      if (blocking.length > 0) {
+        console.log(formatIssues(issues));
+        console.error(`\n❌ Refusing to publish live — ${blocking.length} blocking issue(s) above. Fix them, or re-run with --force to publish anyway.`);
+        process.exitCode = 1;
+        return;
+      }
+    }
+
     const res = await blogger.insertPost({
       blogId: blog.blogger_blog_id, title: o.title, contentHtml: html,
       labels: o.labels?.split(",").map((s) => s.trim()), isDraft: !o.live,
@@ -235,11 +260,14 @@ post.command("publish <htmlFile>")
 post.command("schema").description("Generate JSON-LD (Article/FAQ) to paste into the post HTML")
   .requiredOption("--title <t>").requiredOption("--url <u>").requiredOption("--author <a>")
   .option("--description <d>").option("--image <i>").option("--published <iso>", "ISO date", new Date().toISOString())
+  .option("--publisher <name>", "blog/site name for the required Article publisher field")
+  .option("--logo <url>", "publisher logo image URL")
   .option("--faq <file>", "JSON file: [{question, answer}]")
-  .action((o: { title: string; url: string; author: string; description?: string; image?: string; published: string; faq?: string }) => {
+  .action((o: { title: string; url: string; author: string; description?: string; image?: string; published: string; publisher?: string; logo?: string; faq?: string }) => {
     console.log(articleSchema({
       headline: o.title, url: o.url, authorName: o.author,
       description: o.description, imageUrl: o.image, datePublished: o.published,
+      publisherName: o.publisher, publisherLogoUrl: o.logo,
     }));
     if (o.faq) console.log("\n" + faqSchema(JSON.parse(fs.readFileSync(o.faq, "utf8"))));
   });

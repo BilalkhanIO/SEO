@@ -81,7 +81,8 @@ interface StrikingOpportunity {
 export const GoogleEcosystem: React.FC<{
   currentBlog: Blog | null;
   onNavigateToTab?: (tab: string) => void;
-}> = ({ currentBlog, onNavigateToTab }) => {
+  onRefreshBlogs?: () => void;
+}> = ({ currentBlog, onNavigateToTab, onRefreshBlogs }) => {
   const [subTab, setSubTab] = useState<"adsense" | "analytics" | "gsc">("adsense");
   const [loading, setLoading] = useState(false);
 
@@ -95,15 +96,18 @@ export const GoogleEcosystem: React.FC<{
   const [adsTxtCopied, setAdsTxtCopied] = useState(false);
   const [fixingPageType, setFixingPageType] = useState<string | null>(null);
   const [fixSuccessMsg, setFixSuccessMsg] = useState<string | null>(null);
+  const [connectingAdsense, setConnectingAdsense] = useState(false);
+  const [adsenseConnectMsg, setAdsenseConnectMsg] = useState<string | null>(null);
 
   // GA4 State
   const [gaProperties, setGaProperties] = useState<any[]>([]);
   const [selectedGaProperty, setSelectedGaProperty] = useState<string>("");
   const [gaTraffic, setGaTraffic] = useState<Ga4Traffic | null>(null);
   const [gaTopPages, setGaTopPages] = useState<any[]>([]);
+  const [connectingGa, setConnectingGa] = useState(false);
+  const [gaConnectMsg, setGaConnectMsg] = useState<string | null>(null);
 
   // GSC State
-  const [sitemaps, setSitemaps] = useState<any[]>([]);
   const [strikingKws, setStrikingKws] = useState<StrikingOpportunity[]>([]);
   const [sitemapSubmitting, setSitemapSubmitting] = useState(false);
   const [sitemapSuccess, setSitemapSuccess] = useState<string | null>(null);
@@ -126,12 +130,43 @@ export const GoogleEcosystem: React.FC<{
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
         setAccounts(data);
-        const first = data[0].name;
-        setSelectedAccount(first);
-        loadAdSenseMetrics(first);
+        const saved = currentBlog?.adsense_account;
+        const preferred = saved && data.some((a: AdSenseAccount) => a.name === saved) ? saved : data[0].name;
+        setSelectedAccount(preferred);
+        loadAdSenseMetrics(preferred);
       }
     } catch (err) {
       console.warn("AdSense fetch error:", err);
+    }
+  };
+
+  const handleSelectAccount = (accName: string) => {
+    setSelectedAccount(accName);
+    setAdsenseConnectMsg(null);
+    if (accName) loadAdSenseMetrics(accName);
+  };
+
+  const handleConnectAdsense = async () => {
+    if (!currentBlog || !selectedAccount) return;
+    setConnectingAdsense(true);
+    setAdsenseConnectMsg(null);
+    try {
+      const res = await fetch("/api/blogs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: currentBlog.url, adsenseAccount: selectedAccount }),
+      });
+      if (res.ok) {
+        setAdsenseConnectMsg(`Connected to "${currentBlog.name}".`);
+        onRefreshBlogs?.();
+      } else {
+        const d = await res.json();
+        setAdsenseConnectMsg(d.error || "Failed to connect AdSense account.");
+      }
+    } catch (err: any) {
+      setAdsenseConnectMsg(err.message);
+    } finally {
+      setConnectingAdsense(false);
     }
   };
 
@@ -176,12 +211,43 @@ export const GoogleEcosystem: React.FC<{
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
         setGaProperties(data);
-        const first = data[0].propertyId;
-        setSelectedGaProperty(first);
-        loadGaMetrics(first);
+        const saved = currentBlog?.ga4_property;
+        const preferred = saved && data.some((p: any) => p.propertyId === saved) ? saved : data[0].propertyId;
+        setSelectedGaProperty(preferred);
+        loadGaMetrics(preferred);
       }
     } catch (err) {
       console.warn("Analytics fetch error:", err);
+    }
+  };
+
+  const handleSelectGaProperty = (propId: string) => {
+    setSelectedGaProperty(propId);
+    setGaConnectMsg(null);
+    if (propId) loadGaMetrics(propId);
+  };
+
+  const handleConnectGa = async () => {
+    if (!currentBlog || !selectedGaProperty) return;
+    setConnectingGa(true);
+    setGaConnectMsg(null);
+    try {
+      const res = await fetch("/api/blogs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: currentBlog.url, ga4Property: selectedGaProperty }),
+      });
+      if (res.ok) {
+        setGaConnectMsg(`Connected to "${currentBlog.name}".`);
+        onRefreshBlogs?.();
+      } else {
+        const d = await res.json();
+        setGaConnectMsg(d.error || "Failed to connect GA4 property.");
+      }
+    } catch (err: any) {
+      setGaConnectMsg(err.message);
+    } finally {
+      setConnectingGa(false);
     }
   };
 
@@ -204,13 +270,8 @@ export const GoogleEcosystem: React.FC<{
     if (!currentBlog?.url) return;
     try {
       const cleanUrl = currentBlog.url.endsWith("/") ? currentBlog.url : `${currentBlog.url}/`;
-      const [smRes, strRes] = await Promise.all([
-        fetch(`/api/gsc/sitemaps?siteUrl=${encodeURIComponent(cleanUrl)}`).catch(() => ({ json: () => [] })),
-        fetch(`/api/gsc/striking-distance?siteUrl=${encodeURIComponent(cleanUrl)}`),
-      ]);
-      const smData = await smRes.json();
+      const strRes = await fetch(`/api/gsc/striking-distance?siteUrl=${encodeURIComponent(cleanUrl)}`);
       const strData = await strRes.json();
-      setSitemaps(Array.isArray(smData) ? smData : []);
       setStrikingKws(Array.isArray(strData) ? strData : []);
     } catch (err) {
       console.warn("GSC data error:", err);
@@ -362,6 +423,33 @@ export const GoogleEcosystem: React.FC<{
       {/* SUB-TAB 1: ADSENSE & MONETIZATION */}
       {subTab === "adsense" && (
         <div className="space-y-6">
+          {/* Account selector + connect-to-blog */}
+          <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <label className="text-xs font-semibold text-stone-300 shrink-0">AdSense Account</label>
+            <select
+              value={selectedAccount}
+              onChange={(e) => handleSelectAccount(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100 text-xs"
+            >
+              {accounts.length === 0 && <option value="">No accounts found</option>}
+              {accounts.map((a) => (
+                <option key={a.name} value={a.name}>
+                  {a.displayName}
+                </option>
+              ))}
+            </select>
+            {currentBlog && (
+              <button
+                onClick={handleConnectAdsense}
+                disabled={connectingAdsense || !selectedAccount}
+                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-stone-950 font-bold text-xs shrink-0 cursor-pointer"
+              >
+                {connectingAdsense ? "Connecting..." : `Connect to "${currentBlog.name}"`}
+              </button>
+            )}
+            {adsenseConnectMsg && <span className="text-[11px] text-emerald-400">{adsenseConnectMsg}</span>}
+          </div>
+
           {/* Earnings Overview Cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
             <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
@@ -585,6 +673,33 @@ export const GoogleEcosystem: React.FC<{
       {/* SUB-TAB 2: GOOGLE ANALYTICS (GA4) */}
       {subTab === "analytics" && (
         <div className="space-y-6">
+          {/* Property selector + connect-to-blog */}
+          <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <label className="text-xs font-semibold text-stone-300 shrink-0">GA4 Property</label>
+            <select
+              value={selectedGaProperty}
+              onChange={(e) => handleSelectGaProperty(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100 text-xs"
+            >
+              {gaProperties.length === 0 && <option value="">No properties found</option>}
+              {gaProperties.map((p) => (
+                <option key={p.propertyId} value={p.propertyId}>
+                  {p.displayName} ({p.propertyId})
+                </option>
+              ))}
+            </select>
+            {currentBlog && (
+              <button
+                onClick={handleConnectGa}
+                disabled={connectingGa || !selectedGaProperty}
+                className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-stone-950 font-bold text-xs shrink-0 cursor-pointer"
+              >
+                {connectingGa ? "Connecting..." : `Connect to "${currentBlog.name}"`}
+              </button>
+            )}
+            {gaConnectMsg && <span className="text-[11px] text-emerald-400">{gaConnectMsg}</span>}
+          </div>
+
           {/* Traffic Metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">

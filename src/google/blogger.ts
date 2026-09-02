@@ -65,6 +65,13 @@ export async function insertPost(opts: {
   title: string;
   contentHtml: string;
   labels?: string[];
+  /**
+   * Best-effort only: Blogger's API does not document `customMetaData` as the
+   * post's search-snippet meta description, and Google's own support forum
+   * reports it frequently fails to persist as one. Don't rely on this to set
+   * the search description — embed it in the post's JSON-LD `description`
+   * instead (see ai/gemini.ts), which is the mechanism search engines read.
+   */
   customMetaData?: string;
   isDraft?: boolean;
 }) {

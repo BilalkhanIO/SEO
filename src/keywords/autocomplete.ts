@@ -19,15 +19,16 @@ export async function suggest(query: string, opts: { gl?: string; hl?: string; d
   if (opts.gl) params.set("gl", opts.gl);
   if (opts.hl) params.set("hl", opts.hl);
   if (opts.ds) params.set("ds", opts.ds);
-  const res = await fetch(`${ENDPOINT}?${params}`, {
-    headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" },
-  });
-  if (!res.ok) return [];
   try {
+    const res = await fetch(`${ENDPOINT}?${params}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" },
+    });
+    if (!res.ok) return [];
     const data = (await res.json()) as [string, string[]];
     return Array.isArray(data?.[1]) ? data[1] : [];
   } catch {
-    return []; // non-JSON response (proxy/block page) — treat as no suggestions
+    // network error (blocked/refused by sandbox or proxy) or non-JSON response — no suggestions
+    return [];
   }
 }
 

@@ -34,6 +34,11 @@ export async function listSites(): Promise<string[]> {
   }
 }
 
+// GSC's searchanalytics.query caps a single request at 25,000 rows. Requesting more than that
+// requires paging with startRow — without it, a blog with more query/page combinations than the
+// cap silently loses its lowest-volume rows with no error.
+const GSC_MAX_ROWS_PER_REQUEST = 25000;
+
 export async function queryAnalytics(opts: {
   siteUrl: string;
   startDate: string;
@@ -42,25 +47,40 @@ export async function queryAnalytics(opts: {
   rowLimit?: number;
   pageFilter?: string;
 }): Promise<GscRow[]> {
-  const body: Record<string, unknown> = {
-    startDate: opts.startDate,
-    endDate: opts.endDate,
-    dimensions: opts.dimensions,
-    rowLimit: opts.rowLimit ?? 5000,
-  };
-  if (opts.pageFilter) {
-    body.dimensionFilterGroups = [
-      { filters: [{ dimension: "page", operator: "equals", expression: opts.pageFilter }] },
-    ];
+  const targetTotal = opts.rowLimit ?? 5000;
+  const rows: GscRow[] = [];
+  let startRow = 0;
+
+  while (rows.length < targetTotal) {
+    const pageSize = Math.min(GSC_MAX_ROWS_PER_REQUEST, targetTotal - rows.length);
+    const body: Record<string, unknown> = {
+      startDate: opts.startDate,
+      endDate: opts.endDate,
+      dimensions: opts.dimensions,
+      rowLimit: pageSize,
+      startRow,
+    };
+    if (opts.pageFilter) {
+      body.dimensionFilterGroups = [
+        { filters: [{ dimension: "page", operator: "equals", expression: opts.pageFilter }] },
+      ];
+    }
+    const res = await sc().searchanalytics.query({ siteUrl: opts.siteUrl, requestBody: body });
+    const page = res.data.rows || [];
+    rows.push(
+      ...page.map((r) => ({
+        keys: r.keys || [],
+        clicks: r.clicks || 0,
+        impressions: r.impressions || 0,
+        ctr: r.ctr || 0,
+        position: r.position || 0,
+      }))
+    );
+    if (page.length < pageSize) break; // fewer rows than asked for — no more data
+    startRow += page.length;
   }
-  const res = await sc().searchanalytics.query({ siteUrl: opts.siteUrl, requestBody: body });
-  return (res.data.rows || []).map((r) => ({
-    keys: r.keys || [],
-    clicks: r.clicks || 0,
-    impressions: r.impressions || 0,
-    ctr: r.ctr || 0,
-    position: r.position || 0,
-  }));
+
+  return rows;
 }
 
 /**
@@ -184,12 +204,23 @@ export async function listSitemaps(siteUrl: string) {
   }
 }
 
+/**
+ * Notify Google's Indexing API about a URL. NOTE: Google documents this API as
+ * intended only for pages marked up with JobPosting/BroadcastEvent structured data —
+ * for regular blog posts, submissions are generally accepted (200 OK) but have little
+ * to no measurable effect on crawl priority. Treat this as a low-cost nudge, not a
+ * substitute for the playbook §7 fixes (sitemap submission, internal links, content
+ * quality) which are what actually gets ordinary posts indexed.
+ */
 export async function requestGoogleIndexing(
   url: string,
   type: "URL_UPDATED" | "URL_DELETED" = "URL_UPDATED"
 ): Promise<any> {
   const auth = getOAuthClient() as any;
   const token = await auth.getAccessToken();
+  if (!token?.token) {
+    throw new Error("Not authenticated with Google (no access token) — run `seo auth login` or set GOOGLE_REFRESH_TOKEN.");
+  }
 
   const res = await fetch("https://indexing.googleapis.com/v3/urlNotifications:publish", {
     method: "POST",
@@ -205,6 +236,11 @@ export async function requestGoogleIndexing(
 
   if (!res.ok) {
     const errText = await res.text();
+    if (res.status === 403 && /insufficient|scope/i.test(errText)) {
+      throw new Error(
+        `Indexing API Error: 403 insufficient permissions — the stored Google login may predate the "indexing" OAuth scope. Re-run \`seo auth login\` to re-authorize. Raw: ${errText}`
+      );
+    }
     throw new Error(`Indexing API Error: ${res.status} ${errText}`);
   }
 

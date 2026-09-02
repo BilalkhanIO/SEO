@@ -13,6 +13,8 @@ export const SchemaGenerator: React.FC = () => {
   const [description, setDescription] = useState("Step-by-step masterclass on optimizing Google Blogger for top search rankings.");
   const [imageUrl, setImageUrl] = useState("https://example.com/banner.jpg");
   const [datePublished, setDatePublished] = useState(new Date().toISOString().slice(0, 10));
+  const [publisherName, setPublisherName] = useState("");
+  const [publisherLogoUrl, setPublisherLogoUrl] = useState("");
 
   // FAQ State
   const [faqs, setFaqs] = useState<{ question: string; answer: string }[]>([
@@ -84,6 +86,13 @@ export const SchemaGenerator: React.FC = () => {
           name: authorName,
           url: authorUrl || undefined,
         },
+        publisher: publisherName
+          ? {
+              "@type": "Organization",
+              name: publisherName,
+              logo: publisherLogoUrl ? { "@type": "ImageObject", url: publisherLogoUrl } : undefined,
+            }
+          : undefined,
         datePublished: new Date(datePublished).toISOString(),
         dateModified: new Date().toISOString(),
         mainEntityOfPage: {
@@ -215,6 +224,32 @@ export const SchemaGenerator: React.FC = () => {
                     className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-700 text-stone-100"
                   />
                 </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-stone-300 mb-1">Publisher / Blog Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. My Blog"
+                      value={publisherName}
+                      onChange={(e) => setPublisherName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-700 text-stone-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-stone-300 mb-1">Publisher Logo URL</label>
+                    <input
+                      type="url"
+                      placeholder="https://myblog.com/logo.png"
+                      value={publisherLogoUrl}
+                      onChange={(e) => setPublisherLogoUrl(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-700 text-stone-100"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-stone-500 -mt-1">
+                  Optional, but Google's Article rich-result guidelines want a publisher name + logo.
+                </p>
               </div>
             )}
 

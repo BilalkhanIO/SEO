@@ -19,7 +19,7 @@ import {
 interface KeywordResearchProps {
   currentBlog: Blog | null;
   onOpenSerp: (keyword: string, keywordId?: number) => void;
-  onCreateBrief: (keywordId: number) => void;
+  onCreateBrief: (keywordId: number, keyword: string) => void;
 }
 
 export const KeywordResearch: React.FC<KeywordResearchProps> = ({
@@ -202,17 +202,15 @@ export const KeywordResearch: React.FC<KeywordResearchProps> = ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          keywordId: undefined,
           keyword: item.keyword,
           blogId: currentBlog?.id,
           relevance: 2,
-          intent: 2,
+          intentFit: 2,
           winnable: 2,
           traffic: 2,
           value: 2,
-          intentType: item.intent,
+          intent: item.intent,
           notes: `Imported from Gemini AI (${item.priorityScore}/10 priority)`,
-          status: "scored",
         }),
       });
       if (res.ok) {
@@ -784,7 +782,7 @@ export const KeywordResearch: React.FC<KeywordResearchProps> = ({
                         </button>
                         {kw.score_total !== null && kw.score_total >= 6 && (
                           <button
-                            onClick={() => onCreateBrief(kw.id)}
+                            onClick={() => onCreateBrief(kw.id, kw.keyword)}
                             className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-semibold text-[11px]"
                           >
                             Brief

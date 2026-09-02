@@ -16,6 +16,8 @@ export interface PostInput {
   searchDescription?: string;
   permalinkSet?: boolean; // custom permalink confirmed in Blogger editor before publish
   keyword?: string;
+  /** The blog's own URL, so same-domain links count as internal rather than external. */
+  siteUrl?: string;
 }
 
 export function validatePost(post: PostInput): ValidationIssue[] {
@@ -55,10 +57,28 @@ export function validatePost(post: PostInput): ValidationIssue[] {
       push("keyword-early", "warn", "Target keyword not in the first 100 words — answer the query up front.");
   }
 
-  // Links
+  // Links. Generated internal links are full same-domain URLs (e.g. from Blogger's own
+  // listPosts), not relative paths, so a plain startsWith("http") check would misclassify
+  // them as external — compare hosts against the blog's own URL when provided.
+  let siteHost: string | undefined;
+  if (post.siteUrl) {
+    try {
+      siteHost = new URL(post.siteUrl).host;
+    } catch {
+      // ignore malformed siteUrl
+    }
+  }
+  const isSameHost = (h: string): boolean => {
+    if (!siteHost) return false;
+    try {
+      return new URL(h).host === siteHost;
+    } catch {
+      return false;
+    }
+  };
   const links = $("a[href]").toArray().map((a) => $(a).attr("href") || "");
-  const internal = links.filter((h) => h.startsWith("/") || h.includes("INTERNAL"));
-  const external = links.filter((h) => h.startsWith("http"));
+  const internal = links.filter((h) => h.startsWith("/") || h.includes("INTERNAL") || isSameHost(h));
+  const external = links.filter((h) => h.startsWith("http") && !isSameHost(h));
   const expectedInternal = Math.max(3, Math.round((words / 1000) * 3));
   if (internal.length + external.length === 0) push("links", "error", "No links at all — add internal links to related posts and 2–5 authoritative external sources.");
   else {
@@ -76,7 +96,22 @@ export function validatePost(post: PostInput): ValidationIssue[] {
   // Length sanity
   if (words < 500) push("length", "warn", `Only ~${words} words — fine if the query is fully answered, but check the SERP median.`);
 
+  // Structured data (playbook §4 stage 5: "JSON-LD schema generated")
+  if (!post.html.includes("application/ld+json")) push("schema", "error", "No JSON-LD structured data found — add Article/BlogPosting schema (+ FAQPage if the post has an FAQ section).");
+
   return issues;
+}
+
+/**
+ * Error-level issues that should actually block a fully-automated publish.
+ * "permalink" is excluded by default: Blogger's API has no documented way to set a
+ * custom permalink, so an unattended flow can never satisfy that check — treat it as
+ * informational there rather than a permanent block. Pass `ignoreRules` to exclude
+ * other rules a specific caller can't reasonably fix (e.g. re-checking an already-live post).
+ */
+export function blockingIssues(issues: ValidationIssue[], opts: { ignoreRules?: string[] } = {}): ValidationIssue[] {
+  const ignore = new Set(["permalink", ...(opts.ignoreRules || [])]);
+  return issues.filter((i) => i.level === "error" && !ignore.has(i.rule));
 }
 
 export function formatIssues(issues: ValidationIssue[]): string {

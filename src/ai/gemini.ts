@@ -1,5 +1,25 @@
 import { GoogleGenAI } from "@google/genai";
 import { loadConfig } from "../config.js";
+import type { CompetitorContext } from "../serp/serp.js";
+
+function competitorPromptBlock(ctx?: CompetitorContext): string {
+  if (!ctx) return "";
+  const parts: string[] = [];
+  if (ctx.headings.length > 0) {
+    parts.push(
+      `Page-1 competitors currently cover these headings — your outline MUST cover everything meaningful they cover, then go further (this is "the gap" that outranks them):\n${ctx.headings
+        .slice(0, 25)
+        .join("\n")}`
+    );
+  }
+  if (ctx.paaQuestions.length > 0) {
+    parts.push(`People Also Ask questions to answer (use as FAQ/H2 candidates):\n${ctx.paaQuestions.slice(0, 8).join("\n")}`);
+  }
+  if (ctx.relatedSearches.length > 0) {
+    parts.push(`Related searches to naturally cover as secondary subtopics:\n${ctx.relatedSearches.slice(0, 8).join("\n")}`);
+  }
+  return parts.length > 0 ? `\n\nCOMPETITIVE RESEARCH (page-1 SERP for this keyword):\n${parts.join("\n\n")}` : "";
+}
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -175,30 +195,35 @@ export async function generateFullBlogPost(
   keyword: string,
   niche?: string,
   internalLinks?: { title: string; url: string }[],
-  topAnalyticsTopics?: string[]
+  topAnalyticsTopics?: string[],
+  competitorCtx?: CompetitorContext
 ): Promise<{ title: string; htmlContent: string; tags: string[]; searchDescription: string }> {
+  const targetWords = competitorCtx?.targetWordCount ?? 1500;
+  const expectedInternal = internalLinks && internalLinks.length > 0 ? Math.max(3, Math.round((targetWords / 1000) * 3)) : 0;
   const prompt = `You are a world-class AI Content Writer, SEO Specialist, and AdSense Monetization Expert.
 Write a comprehensive, engaging, highly authoritative, and fully optimized blog post targeting the keyword: "${keyword}".
 ${niche ? `Niche: ${niche}` : ""}
 ${topAnalyticsTopics && topAnalyticsTopics.length > 0 ? `Your blog's highest traffic topics are currently: ${topAnalyticsTopics.join(", ")}. If possible, lightly frame or relate the content to these proven high-traffic areas.` : ""}
+${competitorPromptBlock(competitorCtx)}
 
 Content Requirements:
-1. Provide a click-worthy SEO Title (H1 equivalent, under 60 characters).
-2. Write deep, valuable, high-E-E-A-T body content (Target 1,500+ words).
-3. Use clean semantic HTML5 markup: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <blockquote>, <table>.
+1. Provide a click-worthy SEO Title (H1 equivalent, between 40 and 60 characters — not shorter, not longer).
+2. Write deep, valuable, high-E-E-A-T body content (Target ${targetWords}+ words${competitorCtx?.targetWordCount ? " — this is based on what's actually ranking on page 1 for this keyword right now" : ""}).
+3. Use clean semantic HTML5 markup: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <blockquote>, <table>. Do NOT use <h1> anywhere in the body — Blogger renders the post title as the page's H1.
 4. Include an interactive Comparison Table or Feature Breakdown table.
 5. Include a "Key Takeaways" summary box right after the introduction.
 6. Include a rich "Frequently Asked Questions" (FAQ) section with 4-5 high-intent questions and structured answers.
-7. Embed a valid Schema.org FAQPage and BlogPosting JSON-LD script at the bottom of the HTML content.
+7. Embed a valid Schema.org FAQPage and BlogPosting JSON-LD script at the bottom of the HTML content. The BlogPosting object's "description" property MUST be set to the exact same text as the "searchDescription" you return below (Blogger's API has no reliable way to set the post's search-snippet meta description directly, so this structured-data description is the mechanism search engines actually read).
 8. Provide 3-5 relevant Blogger category tags/labels.
-9. Provide a highly optimized SEO search description (meta description) under 150 characters.
-10. EXTERNAL LINKING: Include 1-2 outbound links to high-authority, non-competing external sources (e.g., Wikipedia, official documentation, reputable industry journals) using descriptive anchor text.
+9. Provide a highly optimized SEO search description (meta description) between 130 and 155 characters.
+10. If you include any <img> tags, every one MUST have a descriptive, keyword-relevant alt="..." attribute — never omit it or leave it empty.
+11. EXTERNAL LINKING: Include 2 to 5 outbound links to high-authority, non-competing external sources (e.g., Wikipedia, official documentation, reputable industry journals) using descriptive anchor text.
 ${
   internalLinks && internalLinks.length > 0
-    ? `\n11. CRITICAL SEO REQUIREMENT: Contextually weave 1 to 3 internal links into the body paragraphs using appropriate anchor text. You may choose from these available related posts:\n${internalLinks
+    ? `\n12. CRITICAL SEO REQUIREMENT: Contextually weave at least ${expectedInternal} internal links (playbook target: 3-6 per 1,000 words) into the body paragraphs using appropriate anchor text. You may choose from these available related posts:\n${internalLinks
         .slice(0, 15)
         .map((link) => `- Title: "${link.title}" | URL: ${link.url}`)
-        .join("\n")}\nFormat the links properly as <a href="URL">anchor text</a>.`
+        .join("\n")}\nFormat the links properly as <a href="URL">anchor text</a>, using each URL exactly as given.`
     : ""
 }
 
@@ -215,6 +240,9 @@ Respond ONLY in valid JSON format:
     contents: prompt,
     config: {
       responseMimeType: "application/json",
+      // A 1,500+ word article plus FAQ + JSON-LD schema can exceed a model's
+      // default output cap, silently truncating the JSON and shrinking the article.
+      maxOutputTokens: 8192,
     },
   });
 
@@ -232,13 +260,16 @@ export async function fixAndEnrichBlogPost(
   currentHtml: string,
   title: string,
   keyword?: string,
-  internalLinks?: { title: string; url: string }[]
+  internalLinks?: { title: string; url: string }[],
+  competitorCtx?: CompetitorContext
 ): Promise<{
   improvedTitle: string;
   improvedHtml: string;
   changelog: string[];
   searchDescription: string;
 }> {
+  const targetWords = competitorCtx?.targetWordCount ?? 1500;
+  const expectedInternal = internalLinks && internalLinks.length > 0 ? Math.max(3, Math.round((targetWords / 1000) * 3)) : 0;
   const prompt = `You are an SEO Content Optimizer and AdSense Approval Specialist.
 Optimize, rewrite, and significantly expand the following existing Blogger post to fix all content quality and ranking issues.
 
@@ -246,23 +277,25 @@ Current Post Title: "${title}"
 ${keyword ? `Target Primary Keyword: "${keyword}"` : ""}
 Current Post HTML:
 ${currentHtml.slice(0, 5000)}
+${competitorPromptBlock(competitorCtx)}
 
 Your Task:
-1. If the content is thin (< 1,000 words), expand it with in-depth practical advice, steps, examples, and deep domain knowledge (reach 1,500+ words).
-2. Add missing semantic <h2> and <h3> subheadings with keyword variations.
-3. Add a structured 3-5 item FAQ section with clear, concise answers for Google Featured Snippets.
-4. Add Schema.org JSON-LD structured data (FAQPage + BlogPosting) at the bottom.
-5. Fix image tags by ensuring all <img> tags have descriptive 'alt="..."' attributes.
-6. Add an informative Comparison Table or Step-by-Step checklist.
-7. Return clean HTML ready for Google Blogger without markdown wrappers.
-8. Provide a highly optimized SEO search description (meta description) under 150 characters based on the expanded content.
-9. EXTERNAL LINKING: Include 1-2 outbound links to high-authority, non-competing external sources (e.g., Wikipedia, official documentation, reputable industry journals) using descriptive anchor text.
+1. If the content is thin (< 1,000 words), expand it with in-depth practical advice, steps, examples, and deep domain knowledge (reach ${targetWords}+ words${competitorCtx?.targetWordCount ? " — this is based on what's actually ranking on page 1 for this keyword right now" : ""}).
+2. Add missing semantic <h2> and <h3> subheadings with keyword variations. Do NOT add an <h1> — Blogger renders the post title as the page's H1.
+3. Keep the improved title between 40 and 60 characters (best CTR range).
+4. Add a structured 3-5 item FAQ section with clear, concise answers for Google Featured Snippets.
+5. Add Schema.org JSON-LD structured data (FAQPage + BlogPosting) at the bottom. The BlogPosting object's "description" property MUST be set to the exact same text as the "searchDescription" you return below (Blogger's API has no reliable way to set the post's search-snippet meta description directly, so this structured-data description is the mechanism search engines actually read).
+6. Fix image tags by ensuring all <img> tags have descriptive 'alt="..."' attributes.
+7. Add an informative Comparison Table or Step-by-Step checklist.
+8. Return clean HTML ready for Google Blogger without markdown wrappers.
+9. Provide a highly optimized SEO search description (meta description) between 130 and 155 characters based on the expanded content.
+10. EXTERNAL LINKING: Include 2 to 5 outbound links to high-authority, non-competing external sources (e.g., Wikipedia, official documentation, reputable industry journals) using descriptive anchor text.
 ${
   internalLinks && internalLinks.length > 0
-    ? `\n10. CRITICAL SEO REQUIREMENT: Contextually weave 1 to 3 internal links into the expanded body paragraphs using appropriate anchor text. You may choose from these available related posts:\n${internalLinks
+    ? `\n11. CRITICAL SEO REQUIREMENT: Contextually weave at least ${expectedInternal} internal links (playbook target: 3-6 per 1,000 words) into the expanded body paragraphs using appropriate anchor text. You may choose from these available related posts:\n${internalLinks
         .slice(0, 15)
         .map((link) => `- Title: "${link.title}" | URL: ${link.url}`)
-        .join("\n")}\nFormat the links properly as <a href="URL">anchor text</a>.`
+        .join("\n")}\nFormat the links properly as <a href="URL">anchor text</a>, using each URL exactly as given.`
     : ""
 }
 
@@ -285,6 +318,9 @@ Respond ONLY in valid JSON:
     contents: prompt,
     config: {
       responseMimeType: "application/json",
+      // A 1,500+ word article plus FAQ + JSON-LD schema can exceed a model's
+      // default output cap, silently truncating the JSON and shrinking the article.
+      maxOutputTokens: 8192,
     },
   });
 

@@ -1,20 +1,22 @@
 import express from "express";
 import path from "path";
+import dns from "node:dns/promises";
+import net from "node:net";
 import { migrate, all, run } from "./src/store.js";
 import { hasCredentials, getOAuthClient, storeTokens, SCOPES } from "./src/google/auth.js";
 import * as gsc from "./src/google/gsc.js";
 import * as blogger from "./src/google/blogger.js";
 import { runPageSpeed } from "./src/google/pagespeed.js";
 import { harvest, suggest } from "./src/keywords/autocomplete.js";
-import { fetchSerp, enrichSerp, briefFromSerp, extractPage } from "./src/serp/serp.js";
-import { validatePost, formatIssues } from "./src/content/validate.js";
+import { fetchSerp, enrichSerp, briefFromSerp, extractPage, competitorContext } from "./src/serp/serp.js";
+import { validatePost, blockingIssues, formatIssues } from "./src/content/validate.js";
 import { articleSchema, faqSchema, howToSchema } from "./src/content/schema.js";
 import { runRecipes, saveAlerts } from "./src/tracking/recipes.js";
 import * as outreach from "./src/outreach/outreach.js";
 import { loadConfig } from "./src/config.js";
 import * as adsense from "./src/google/adsense.js";
 import * as analytics from "./src/google/analytics.js";
-import { runAutomationCycle, run360AutoPilot } from "./src/automation/routine.js";
+import { runAutomationCycle, run360AutoPilot, generateWithMinWordCount, MIN_WORD_COUNT, checkAndFixIndexing } from "./src/automation/routine.js";
 import {
   generateSeoBriefWithGemini,
   generateSeoMetadataWithGemini,
@@ -24,10 +26,76 @@ import {
   generatePolicyPage,
 } from "./src/ai/gemini.js";
 
+function isPrivateOrReservedIp(addr: string): boolean {
+  if (net.isIPv4(addr)) {
+    const [a, b] = addr.split(".").map(Number);
+    if (a === 127) return true; // loopback
+    if (a === 10) return true; // private
+    if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata (169.254.169.254)
+    if (a === 172 && b >= 16 && b <= 31) return true; // private
+    if (a === 192 && b === 168) return true; // private
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    if (a === 0) return true; // "this network"
+    return false;
+  }
+  if (net.isIPv6(addr)) {
+    const lower = addr.toLowerCase();
+    if (lower === "::1" || lower === "::") return true; // loopback / unspecified
+    if (lower.startsWith("fe80:")) return true; // link-local
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local (fc00::/7)
+    if (lower.startsWith("::ffff:")) {
+      const v4 = lower.split(":").pop()!;
+      if (net.isIPv4(v4)) return isPrivateOrReservedIp(v4);
+    }
+    return false;
+  }
+  return true; // unrecognized format — fail closed
+}
+
+/**
+ * SSRF guard for user-supplied URLs fetched server-side (scrape-url, audit-robots): only
+ * http/https, and resolve the hostname to reject loopback/private/link-local/metadata IPs
+ * (e.g. 169.254.169.254, 127.0.0.1, 10.0.0.0/8) before the real fetch happens.
+ */
+async function assertPublicHttpTarget(rawUrl: string): Promise<string> {
+  let target: URL;
+  try {
+    target = new URL(rawUrl);
+  } catch {
+    throw new Error("Invalid URL");
+  }
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    throw new Error("Only http/https URLs are allowed");
+  }
+  const hostname = target.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    throw new Error("Requests to localhost are not allowed");
+  }
+
+  const addresses = net.isIP(hostname)
+    ? [hostname]
+    : (await dns.lookup(hostname, { all: true }).catch(() => [])).map((r) => r.address);
+  if (addresses.length === 0) {
+    throw new Error("Could not resolve host");
+  }
+  if (addresses.some(isPrivateOrReservedIp)) {
+    throw new Error("Requests to private/internal/reserved IP ranges are not allowed");
+  }
+  return target.toString();
+}
+
 export function createApp() {
   const app = express();
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "10mb" }));
+  // Body-parser leaves req.body as `undefined` (not `{}`) for requests with no
+  // JSON body (e.g. a GET/POST with no Content-Type). Routes below destructure
+  // req.body directly, so without this they'd throw an unhandled TypeError
+  // ("Cannot destructure property ... of undefined") instead of a clean 400.
+  app.use((req, res, next) => {
+    if (req.body === undefined) req.body = {};
+    next();
+  });
 
   // Auto-run migrations lazily
   let migrated = false;
@@ -49,7 +117,7 @@ export function createApp() {
     try {
       const { blogId, niche } = req.body;
       if (!blogId || !niche) return res.status(400).json({ error: "blogId and niche required" });
-      const result = await runAutomationCycle(blogId, niche);
+      const result = await runAutomationCycle(blogId, { nicheOverride: niche });
       res.json(result);
     } catch (err: any) {
       console.error(err);
@@ -150,15 +218,38 @@ export function createApp() {
 
   app.post("/api/blogs", async (req, res) => {
     try {
-      const { name, url, gscProperty, niche } = req.body;
+      const { name, url, bloggerBlogId, gscProperty, ga4Property, adsenseAccount, isCustomDomain, niche } = req.body;
       if (!url) return res.status(400).json({ error: "URL is required" });
-      const isCustom = url.includes("blogspot.com") ? 0 : 1;
-      const id = await run(
-        `INSERT INTO blogs (name, url, gsc_property, is_custom_domain, niche)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(url) DO UPDATE SET name = excluded.name, gsc_property = COALESCE(excluded.gsc_property, blogs.gsc_property), niche = COALESCE(excluded.niche, blogs.niche)`,
-        [name || url, url, gscProperty || null, isCustom, niche || null]
-      );
+      const isCustom = typeof isCustomDomain === "boolean" ? (isCustomDomain ? 1 : 0) : url.includes("blogspot.com") ? 0 : 1;
+
+      // Select-then-branch instead of an ON CONFLICT upsert: a COALESCE(?, url) baked into
+      // the INSERT's VALUES resolves to a concrete non-null string before `excluded.name`
+      // is ever evaluated, so a COALESCE(excluded.name, blogs.name) in the conflict clause
+      // can never actually fall back — a partial update (e.g. just connecting a GA4
+      // property) would silently overwrite the existing name with the blog's own URL.
+      const [existing] = await all<any>("SELECT id FROM blogs WHERE url = ?", [url]);
+      let id: number | bigint | undefined;
+      if (existing) {
+        await run(
+          `UPDATE blogs SET
+             name = COALESCE(?, name),
+             blogger_blog_id = COALESCE(?, blogger_blog_id),
+             gsc_property = COALESCE(?, gsc_property),
+             ga4_property = COALESCE(?, ga4_property),
+             adsense_account = COALESCE(?, adsense_account),
+             is_custom_domain = ?,
+             niche = COALESCE(?, niche)
+           WHERE id = ?`,
+          [name || null, bloggerBlogId || null, gscProperty || null, ga4Property || null, adsenseAccount || null, isCustom, niche || null, existing.id]
+        );
+        id = existing.id;
+      } else {
+        id = await run(
+          `INSERT INTO blogs (name, url, blogger_blog_id, gsc_property, ga4_property, adsense_account, is_custom_domain, niche)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [name || url, url, bloggerBlogId || null, gscProperty || null, ga4Property || null, adsenseAccount || null, isCustom, niche || null]
+        );
+      }
       res.json({ success: true, id });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -194,7 +285,11 @@ export function createApp() {
   // Keywords
   app.get("/api/keywords", async (req, res) => {
     try {
-      const blogId = req.query.blogId ? parseInt(req.query.blogId as string) : undefined;
+      let blogId: number | undefined;
+      if (req.query.blogId) {
+        blogId = parseInt(req.query.blogId as string);
+        if (Number.isNaN(blogId)) return res.status(400).json({ error: "blogId must be a number" });
+      }
       const status = req.query.status as string | undefined;
       let sql = "SELECT * FROM keywords";
       const args: (number | string)[] = [];
@@ -268,6 +363,12 @@ export function createApp() {
       const { blogId, days = 90, minImpressions = 50 } = req.body;
       if (!blogId) return res.status(400).json({ error: "Blog ID is required" });
 
+      const daysNum = parseInt(String(days), 10);
+      const minImpressionsNum = parseInt(String(minImpressions), 10);
+      if (Number.isNaN(daysNum) || Number.isNaN(minImpressionsNum)) {
+        return res.status(400).json({ error: "days and minImpressions must be numbers" });
+      }
+
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.gsc_property) {
         return res.status(400).json({ error: "Blog has no GSC property configured" });
@@ -276,7 +377,7 @@ export function createApp() {
       const end = new Date();
       end.setDate(end.getDate() - 2);
       const start = new Date(end);
-      start.setDate(start.getDate() - parseInt(String(days)));
+      start.setDate(start.getDate() - daysNum);
 
       const rows = await gsc.queryAnalytics({
         siteUrl: blog.gsc_property,
@@ -287,7 +388,7 @@ export function createApp() {
       });
 
       const candidates = rows
-        .filter((r) => r.impressions >= parseInt(String(minImpressions)) && r.position > 8)
+        .filter((r) => r.impressions >= minImpressionsNum && r.position > 8)
         .sort((a, b) => b.impressions - a.impressions)
         .slice(0, 100);
 
@@ -336,20 +437,39 @@ export function createApp() {
 
   app.post("/api/keywords/score", async (req, res) => {
     try {
-      const { keywordId, relevance, intentFit, winnable, traffic, value, intent, notes } = req.body;
-      if (!keywordId) return res.status(400).json({ error: "Keyword ID required" });
+      const { keywordId, keyword, blogId, relevance, intentFit, winnable, traffic, value, intent, notes } = req.body;
 
-      const scores = [relevance, intentFit, winnable, traffic, value].map((x) => Math.max(0, Math.min(2, parseInt(x || 0))));
+      // Allow scoring a not-yet-stored keyword (e.g. "Save to Repo" from an AI
+      // suggestion list) by keyword text + blogId instead of an existing row id.
+      let targetId = keywordId;
+      if (!targetId) {
+        if (!keyword || !blogId) {
+          return res.status(400).json({ error: "Keyword ID, or keyword + blogId, is required" });
+        }
+        await run(
+          "INSERT INTO keywords (blog_id, keyword, source, status) VALUES (?, ?, 'manual', 'idea') ON CONFLICT(blog_id, keyword) DO NOTHING",
+          [blogId, keyword]
+        );
+        const [row] = await all<any>("SELECT id FROM keywords WHERE blog_id = ? AND keyword = ?", [blogId, keyword]);
+        if (!row) return res.status(500).json({ error: "Failed to create keyword" });
+        targetId = row.id;
+      }
+
+      const rawScores = [relevance, intentFit, winnable, traffic, value];
+      if (rawScores.some((x) => Number.isNaN(parseInt(x)))) {
+        return res.status(400).json({ error: "relevance, intentFit, winnable, traffic and value must all be numbers 0-2" });
+      }
+      const scores = rawScores.map((x) => Math.max(0, Math.min(2, parseInt(x))));
       const total = scores.reduce((a, b) => a + b, 0);
       const status = total >= 6 ? "scored" : "archived";
 
       await run(
         `UPDATE keywords SET score_relevance=?, score_intent=?, score_winnable=?, score_traffic=?, score_value=?, score_total=?,
          intent = COALESCE(?, intent), notes = COALESCE(?, notes), status = ? WHERE id = ?`,
-        [...scores, total, intent || null, notes || null, status, keywordId]
+        [...scores, total, intent || null, notes || null, status, targetId]
       );
 
-      res.json({ success: true, total, status });
+      res.json({ success: true, id: targetId, total, status });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -358,7 +478,11 @@ export function createApp() {
   // Content Pipeline & Posts
   app.get("/api/posts", async (req, res) => {
     try {
-      const blogId = req.query.blogId ? parseInt(req.query.blogId as string) : undefined;
+      let blogId: number | undefined;
+      if (req.query.blogId) {
+        blogId = parseInt(req.query.blogId as string);
+        if (Number.isNaN(blogId)) return res.status(400).json({ error: "blogId must be a number" });
+      }
       let sql = `
         SELECT p.*, k.keyword, k.score_total as keyword_score, b.name as blog_name
         FROM posts p
@@ -447,6 +571,9 @@ export function createApp() {
   app.post("/api/posts/publish", async (req, res) => {
     try {
       const { blogId, title, html, labels, isDraft = true } = req.body;
+      if (!blogId || !title || !html) {
+        return res.status(400).json({ error: "blogId, title and html are required" });
+      }
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.blogger_blog_id) {
         return res.status(400).json({ error: "Blog has no Blogger ID linked" });
@@ -469,6 +596,7 @@ export function createApp() {
   app.post("/api/posts/schema", (req, res) => {
     try {
       const { type, data } = req.body;
+      if (!data) return res.status(400).json({ error: "data is required" });
       if (type === "faq") {
         return res.json({ schema: faqSchema(data.qa || []) });
       } else if (type === "howto") {
@@ -484,6 +612,8 @@ export function createApp() {
             imageUrl: data.imageUrl,
             datePublished: data.datePublished || new Date().toISOString(),
             dateModified: data.dateModified,
+            publisherName: data.publisherName,
+            publisherLogoUrl: data.publisherLogoUrl,
           }),
         });
       }
@@ -522,13 +652,17 @@ export function createApp() {
   app.post("/api/tracking/sync", async (req, res) => {
     try {
       const { blogId, days = 28 } = req.body;
+      if (!blogId) return res.status(400).json({ error: "blogId is required" });
+      const daysNum = parseInt(String(days), 10);
+      if (Number.isNaN(daysNum)) return res.status(400).json({ error: "days must be a number" });
+
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.gsc_property) return res.status(400).json({ error: "No GSC property linked" });
 
       const end = new Date();
       end.setDate(end.getDate() - 2);
       const start = new Date(end);
-      start.setDate(start.getDate() - parseInt(String(days)));
+      start.setDate(start.getDate() - daysNum);
       const endS = end.toISOString().slice(0, 10);
 
       const rows = await gsc.queryAnalytics({
@@ -539,11 +673,11 @@ export function createApp() {
         rowLimit: 25000,
       });
 
-      await run("DELETE FROM gsc_snapshots WHERE blog_id = ? AND date = ? AND days = ?", [blog.id, endS, parseInt(String(days))]);
+      await run("DELETE FROM gsc_snapshots WHERE blog_id = ? AND date = ? AND days = ?", [blog.id, endS, daysNum]);
       for (const r of rows) {
         await run(
           "INSERT INTO gsc_snapshots (blog_id, date, days, page, query, clicks, impressions, ctr, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [blog.id, endS, parseInt(String(days)), r.keys[0], r.keys[1], r.clicks, r.impressions, r.ctr, r.position]
+          [blog.id, endS, daysNum, r.keys[0], r.keys[1], r.clicks, r.impressions, r.ctr, r.position]
         );
       }
 
@@ -619,11 +753,25 @@ export function createApp() {
   app.post("/api/health/inspect", async (req, res) => {
     try {
       const { blogId, url } = req.body;
+      if (!blogId || !url) return res.status(400).json({ error: "blogId and url are required" });
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.gsc_property) return res.status(400).json({ error: "No GSC property linked" });
 
       const result = await gsc.inspectUrl(blog.gsc_property, url);
       res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Check every live post's actual GSC index status and request indexing only for the
+  // ones genuinely not indexed (playbook §7), rather than a single on-demand URL check.
+  app.post("/api/health/index-sweep", async (req, res) => {
+    try {
+      const { blogId } = req.body;
+      if (!blogId) return res.status(400).json({ error: "blogId is required" });
+      const sweep = await checkAndFixIndexing(blogId);
+      res.json(sweep);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -645,11 +793,12 @@ export function createApp() {
 
   app.post("/api/health/sitemaps/submit", async (req, res) => {
     try {
-      const { blogId } = req.body;
+      const { blogId, feedpath } = req.body;
       const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.gsc_property) return res.status(400).json({ error: "No GSC property linked" });
 
-      const feed = blog.url.replace(/\/$/, "") + "/sitemap.xml";
+      const cleanFeedpath = (typeof feedpath === "string" && feedpath.trim()) || "sitemap.xml";
+      const feed = blog.url.replace(/\/$/, "") + "/" + cleanFeedpath.replace(/^\//, "");
       await gsc.submitSitemap(blog.gsc_property, feed);
       res.json({ success: true, feed });
     } catch (err: any) {
@@ -763,24 +912,68 @@ export function createApp() {
     try {
       const { keyword, niche, blogId, isDraft } = req.body;
       if (!keyword || !blogId) return res.status(400).json({ error: "Keyword and blogId are required" });
-      
-      const blog = db.prepare("SELECT * FROM blogs WHERE id = ?").get(blogId) as any;
+
+      const [blog] = await all<any>("SELECT * FROM blogs WHERE id = ?", [blogId]);
       if (!blog || !blog.blogger_blog_id) return res.status(400).json({ error: "Blog not found or lacks a linked Blogger ID" });
 
-      const content = await generateAutoBlogPost(keyword, niche);
+      const wantsLive = isDraft === false;
+
+      let competitorCtx;
+      try {
+        competitorCtx = competitorContext(await enrichSerp(await fetchSerp(keyword), 5));
+      } catch {
+        competitorCtx = undefined;
+      }
+
+      const { result: content, wordCount } = await generateWithMinWordCount(
+        () => generateAutoBlogPost(keyword, niche, undefined, undefined, competitorCtx),
+        (r) => r.htmlContent,
+        () => {}, // no live log stream for this single-post endpoint; the retry still happens silently
+        `New article ("${keyword}")`
+      );
+
+      if (wordCount < MIN_WORD_COUNT) {
+        return res.status(422).json({
+          error: `Best attempt still only ${wordCount} words (need ${MIN_WORD_COUNT}+). Not publishing thin content — try again.`,
+        });
+      }
+
+      // SEO pre-publish gate (playbook §4 stage 5). If the user asked for live and it fails,
+      // downgrade to draft for manual review instead of blocking or shipping it non-compliant
+      // — permalink is excluded since Blogger's API has no way to set one anyway.
+      let seoWarning: string | undefined;
+      let publishLive = wantsLive;
+      if (wantsLive) {
+        const blocking = blockingIssues(
+          validatePost({ title: content.title, html: content.htmlContent, searchDescription: content.searchDescription, keyword, siteUrl: blog.url })
+        );
+        if (blocking.length > 0) {
+          publishLive = false;
+          seoWarning = formatIssues(blocking);
+        }
+      }
+
       const post = await blogger.insertPost({
         blogId: blog.blogger_blog_id,
         title: content.title,
         contentHtml: content.htmlContent,
         labels: content.tags,
-        isDraft: isDraft !== false,
+        customMetaData: content.searchDescription,
+        isDraft: !publishLive,
       });
+
+      await run(
+        `INSERT INTO posts (blog_id, title, url, blogger_post_id, stage, brief_md) VALUES (?, ?, ?, ?, ?, ?)`,
+        [blogId, content.title, post.url || "", post.id || "", publishLive ? "published" : "drafted", `Manually generated for keyword: ${keyword}`]
+      );
 
       res.json({
         success: true,
         postUrl: post.url,
         postId: post.id,
-        isDraft: post.title ? true : false // just an indicator
+        isDraft: !publishLive,
+        wordCount,
+        seoWarning,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to generate auto blog" });
@@ -806,7 +999,14 @@ export function createApp() {
       const { url } = req.body;
       if (!url) return res.status(400).json({ error: "URL is required" });
 
-      const response = await fetch(url, {
+      let safeUrl: string;
+      try {
+        safeUrl = await assertPublicHttpTarget(url);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+
+      const response = await fetch(safeUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
         },
@@ -851,8 +1051,15 @@ export function createApp() {
 
       const baseUrl = domain.startsWith("http") ? domain : `https://${domain}`;
       const robotsUrl = new URL("/robots.txt", baseUrl).toString();
-      
-      const response = await fetch(robotsUrl);
+
+      let safeRobotsUrl: string;
+      try {
+        safeRobotsUrl = await assertPublicHttpTarget(robotsUrl);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+
+      const response = await fetch(safeRobotsUrl);
       if (!response.ok) throw new Error(`Failed to fetch robots.txt (HTTP ${response.status})`);
       
       const robotsTxt = await response.text();
@@ -917,6 +1124,7 @@ export function createApp() {
       const accountName = req.query.accountName as string;
       const days = parseInt((req.query.days as string) || "30", 10);
       if (!accountName) return res.status(400).json({ error: "accountName query param required" });
+      if (Number.isNaN(days)) return res.status(400).json({ error: "days must be a number" });
       const report = await adsense.getAdSenseReport(accountName, days);
       res.json(report);
     } catch (err: any) {
@@ -1001,6 +1209,7 @@ export function createApp() {
       const propertyId = req.query.propertyId as string;
       const days = parseInt((req.query.days as string) || "30", 10);
       if (!propertyId) return res.status(400).json({ error: "propertyId required" });
+      if (Number.isNaN(days)) return res.status(400).json({ error: "days must be a number" });
       const report = await analytics.getGa4TrafficSummary(propertyId, days);
       res.json(report);
     } catch (err: any) {
@@ -1020,6 +1229,17 @@ export function createApp() {
   });
 
   /* ------------------- GSC STRIKING DISTANCE & SITEMAPS ------------------- */
+
+  app.get("/api/gsc/sitemaps", async (req, res) => {
+    try {
+      const siteUrl = req.query.siteUrl as string;
+      if (!siteUrl) return res.status(400).json({ error: "siteUrl required" });
+      const sitemaps = await gsc.listSitemaps(siteUrl);
+      res.json(sitemaps);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.get("/api/gsc/striking-distance", async (req, res) => {
     try {
@@ -1075,10 +1295,53 @@ export function createApp() {
       const postData = await blogger.getPost(bloggerBlogId, bloggerPostId);
       if (!postData.content) return res.status(400).json({ error: "Post has no content to fix" });
 
-      const fixed = await fixAndEnrichBlogPost(postData.content, title || postData.title || "Blog Post", keyword);
+      const effectiveTitle = title || postData.title || "Blog Post";
+      let competitorCtx;
+      try {
+        competitorCtx = competitorContext(await enrichSerp(await fetchSerp(keyword || effectiveTitle), 5));
+      } catch {
+        competitorCtx = undefined;
+      }
+
+      const { result: fixed, wordCount } = await generateWithMinWordCount(
+        () => fixAndEnrichBlogPost(postData.content!, effectiveTitle, keyword, undefined, competitorCtx),
+        (r) => r.improvedHtml,
+        () => {}, // no live log stream for this single-post endpoint; the retry still happens silently
+        `Enriching "${effectiveTitle}"`
+      );
+
+      if (wordCount < MIN_WORD_COUNT) {
+        return res.status(422).json({
+          error: `Best attempt still only ${wordCount} words (need ${MIN_WORD_COUNT}+). Not publishing thin content — try again.`,
+        });
+      }
+
+      // SEO pre-publish gate (playbook §4 stage 5) — this is an already-live post, so on a
+      // real failure skip the update entirely rather than push a non-compliant rewrite live.
+      let siteUrl: string | undefined;
+      try {
+        siteUrl = postData.url ? new URL(postData.url).origin : undefined;
+      } catch {
+        siteUrl = undefined;
+      }
+      const blocking = blockingIssues(
+        validatePost({
+          title: fixed.improvedTitle,
+          html: fixed.improvedHtml,
+          searchDescription: fixed.searchDescription,
+          keyword: keyword || effectiveTitle,
+          siteUrl,
+          permalinkSet: true,
+        })
+      );
+      if (blocking.length > 0) {
+        return res.status(422).json({ error: `Failed the SEO gate:\n${formatIssues(blocking)}` });
+      }
+
       const updated = await blogger.updatePost(bloggerBlogId, bloggerPostId, {
         title: fixed.improvedTitle,
         content: fixed.improvedHtml,
+        customMetaData: fixed.searchDescription,
       });
 
       // Notify Indexing API if live
@@ -1088,7 +1351,7 @@ export function createApp() {
         } catch {}
       }
 
-      res.json({ success: true, updated, changelog: fixed.changelog });
+      res.json({ success: true, updated, changelog: fixed.changelog, wordCount });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

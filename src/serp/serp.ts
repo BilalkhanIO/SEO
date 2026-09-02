@@ -90,12 +90,39 @@ export async function enrichSerp(analysis: SerpAnalysis, topN = 5): Promise<Serp
   return analysis;
 }
 
-/** Build the brief skeleton from a SERP analysis (playbook stage 3). */
-export function briefFromSerp(a: SerpAnalysis): string {
+/** Median word count across enriched SERP results (null if none were enriched). */
+function medianWordCount(a: SerpAnalysis): number | null {
   const withCounts = a.results.filter((r) => r.wordCount);
-  const median = withCounts.length
+  return withCounts.length
     ? withCounts.map((r) => r.wordCount!).sort((x, y) => x - y)[Math.floor(withCounts.length / 2)]
     : null;
+}
+
+export interface CompetitorContext {
+  headings: string[];
+  paaQuestions: string[];
+  relatedSearches: string[];
+  targetWordCount?: number;
+}
+
+/**
+ * Distill an (enriched) SERP analysis into what content generation actually needs
+ * (playbook §5): the union of competitor headings to cover, PAA questions to answer,
+ * and a target length based on what's actually ranking rather than a fixed guess.
+ */
+export function competitorContext(a: SerpAnalysis): CompetitorContext {
+  const median = medianWordCount(a);
+  return {
+    headings: a.results.flatMap((r) => r.headings || []),
+    paaQuestions: a.peopleAlsoAsk,
+    relatedSearches: a.relatedSearches,
+    targetWordCount: median ? Math.round(median * 1.15) : undefined, // playbook: SERP median ±20%, aim slightly above
+  };
+}
+
+/** Build the brief skeleton from a SERP analysis (playbook stage 3). */
+export function briefFromSerp(a: SerpAnalysis): string {
+  const median = medianWordCount(a);
 
   const allHeadings = a.results.flatMap((r) => r.headings || []);
   const lines: string[] = [];

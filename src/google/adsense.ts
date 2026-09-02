@@ -73,18 +73,30 @@ export async function listAdSenseSites(accountName: string) {
 }
 
 /**
- * List Ad Units created under an account
+ * List Ad Units created under an account.
+ * Ad units are nested under ad clients (accounts/{account}/adclients/{adclient}/adunits),
+ * not directly under the account, so this first resolves the account's ad clients.
  */
 export async function listAdUnits(accountName: string) {
   try {
-    const api: any = getAdSenseApi();
-    const res = await (api.accounts?.adunits || api.accounts?.adUnits || api.accounts?.adclients?.adunits)?.list?.({ parent: accountName }) || { data: {} };
-    return (res.data?.adUnits || []).map((ad: any) => ({
-      name: ad.name || "",
-      displayName: ad.displayName || "Ad Unit",
-      state: ad.state || "ACTIVE",
-      format: ad.contentAdsSettings?.type || "DISPLAY",
-    }));
+    const api = getAdSenseApi();
+    const clientsRes = await api.accounts.adclients.list({ parent: accountName });
+    const adClients = clientsRes.data.adClients || [];
+
+    const units: { name: string; displayName: string; state: string; format: string }[] = [];
+    for (const client of adClients) {
+      if (!client.name) continue;
+      const res = await api.accounts.adclients.adunits.list({ parent: client.name });
+      for (const ad of res.data.adUnits || []) {
+        units.push({
+          name: ad.name || "",
+          displayName: ad.displayName || "Ad Unit",
+          state: ad.state || "ACTIVE",
+          format: ad.contentAdsSettings?.type || "DISPLAY",
+        });
+      }
+    }
+    return units;
   } catch (err: any) {
     console.warn("Notice: Ad units listing error:", err.message);
     return [];
@@ -146,12 +158,12 @@ export async function getAdSenseReport(
 
     const res = await api.accounts.reports.generate({
       account: accountName,
-      "dateRange.startDate.year": start.year,
-      "dateRange.startDate.month": start.month,
-      "dateRange.startDate.day": start.day,
-      "dateRange.endDate.year": end.year,
-      "dateRange.endDate.month": end.month,
-      "dateRange.endDate.day": end.day,
+      "startDate.year": start.year,
+      "startDate.month": start.month,
+      "startDate.day": start.day,
+      "endDate.year": end.year,
+      "endDate.month": end.month,
+      "endDate.day": end.day,
       dimensions: ["DATE"],
       metrics: [
         "PAGE_VIEWS",
@@ -170,7 +182,9 @@ export async function getAdSenseReport(
         pageViews: Number(cells[1]?.value || 0),
         impressions: Number(cells[2]?.value || 0),
         clicks: Number(cells[3]?.value || 0),
-        pageCtr: Number(cells[4]?.value || 0),
+        // PAGE_VIEWS_CTR is a METRIC_RATIO: AdSense returns it as a 0-1 fraction
+        // (e.g. "0.008" for 0.8%), so scale to percentage to match `summary.pageCtr` below.
+        pageCtr: Number(cells[4]?.value || 0) * 100,
         pageRpm: Number(cells[5]?.value || 0),
         estimatedEarnings: Number(cells[6]?.value || 0),
       };
